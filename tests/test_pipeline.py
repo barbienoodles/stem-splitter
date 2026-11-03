@@ -180,7 +180,7 @@ def test_api(song, tmp_path):
 
     from stem_splitter.server import create_app
 
-    client = TestClient(create_app(FakeSeparator("cpu"), tmp_path / "jobs"))
+    client = TestClient(headers={"X-Stem-Splitter": "1"}, app=create_app(FakeSeparator("cpu"), tmp_path / "jobs"))
     info = client.get("/api/info").json()
     assert info["device"] == "cpu" and "vocals" in [s["key"] for s in info["stems"]]
     assert client.get("/").status_code == 200
@@ -287,7 +287,7 @@ def test_zip_is_written_to_disk_not_memory(song, tmp_path):
 
     from stem_splitter.server import create_app
 
-    client = TestClient(create_app(FakeSeparator("cpu"), tmp_path / "jobs"))
+    client = TestClient(headers={"X-Stem-Splitter": "1"}, app=create_app(FakeSeparator("cpu"), tmp_path / "jobs"))
     with open(song, "rb") as f:
         job_id = client.post("/api/jobs", files={"file": ("s.mp3", f)}).json()["id"]
     _wait(client, job_id)
@@ -326,7 +326,7 @@ def test_delete_cancels_running_job(song, tmp_path):
     from stem_splitter.server import create_app
 
     work = tmp_path / "jobs"
-    client = TestClient(create_app(SlowSeparator("cpu"), work))
+    client = TestClient(headers={"X-Stem-Splitter": "1"}, app=create_app(SlowSeparator("cpu"), work))
     with open(song, "rb") as f:
         slow = client.post("/api/jobs", files={"file": ("a.mp3", f)}).json()["id"]
     with open(song, "rb") as f:
@@ -343,3 +343,37 @@ def test_delete_cancels_running_job(song, tmp_path):
             break
         time.sleep(0.1)
     assert not (work / slow).exists()
+
+
+def test_mutating_requests_need_app_header(song, tmp_path):
+    """Un altro sito non può caricare file o chiudere l'app (serve un header non semplice)."""
+    from fastapi.testclient import TestClient
+
+    from stem_splitter.server import create_app
+
+    closed = []
+    client = TestClient(create_app(FakeSeparator("cpu"), tmp_path / "jobs", on_shutdown=lambda: closed.append(1)))
+    with open(song, "rb") as f:
+        assert client.post("/api/jobs", files={"file": ("a.mp3", f)}).status_code == 403
+    assert client.post("/api/shutdown").status_code == 403
+    assert client.delete("/api/jobs/x").status_code == 403
+    assert not closed and client.get("/api/info").json()["can_shutdown"] is True
+    assert client.post("/api/shutdown", headers={"X-Stem-Splitter": "1"}).status_code == 200
+    assert closed == [1]
+
+
+def test_shutdown_unavailable_without_launcher(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from stem_splitter.server import create_app
+
+    client = TestClient(create_app(FakeSeparator("cpu"), tmp_path / "jobs"), headers={"X-Stem-Splitter": "1"})
+    assert client.get("/api/info").json()["can_shutdown"] is False
+    assert client.post("/api/shutdown").status_code == 404
+
+
+def test_app_self_test():
+    """Lo stesso controllo che la CI esegue sugli installer, qui senza congelamento."""
+    from stem_splitter.app import self_test
+
+    assert self_test() == 0

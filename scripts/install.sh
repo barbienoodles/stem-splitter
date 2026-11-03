@@ -36,7 +36,10 @@ PY=""
 SKIPPED_X86=""
 for c in "${CANDIDATES[@]}"; do
   command -v "$c" >/dev/null 2>&1 || continue
-  read -r minor machine < <("$c" -c 'import platform, sys; print(sys.version_info.minor if sys.version_info.major == 3 else 0, platform.machine())')
+  # un candidato che non parte (es. /usr/bin/python3 senza Command Line Tools) si salta
+  minor=0 machine=""
+  read -r minor machine < <("$c" -c 'import platform, sys; print(sys.version_info.minor if sys.version_info.major == 3 else 0, platform.machine())' 2>/dev/null) || true
+  [[ "$minor" =~ ^[0-9]+$ ]] || continue
   (( minor >= 10 && minor <= MAX_MINOR )) || continue
   # un Python x86_64 (es. vecchio Homebrew in /usr/local) su Apple Silicon girerebbe in Rosetta
   if (( APPLE_SILICON )) && [[ "$machine" != "arm64" ]]; then
@@ -53,6 +56,10 @@ if [[ -z "$PY" ]]; then
     echo "   Ignorati perché Intel (x86_64), girerebbero in Rosetta senza GPU:$SKIPPED_X86"
   fi
   echo "   Su Mac: brew install python@3.12   (oppure scaricalo da python.org)"
+  if [[ "$OS" == "Darwin" ]] && ! xcrun --version >/dev/null 2>&1; then
+    echo "   Mancano anche gli Strumenti da riga di comando (errore 'xcrun: invalid active developer path'):"
+    echo "   xcode-select --install"
+  fi
   exit 1
 fi
 echo "🐍 Uso $("$PY" --version) ($PY)"

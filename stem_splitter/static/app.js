@@ -33,8 +33,11 @@ const fmtTime = (s) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-async function api(path, opts) {
-  const res = await fetch(path, opts);
+// header richiesto dal server per le richieste che modificano qualcosa (protezione CSRF)
+const APP_HEADERS = { "X-Stem-Splitter": "1" };
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...APP_HEADERS, ...(opts.headers || {}) } });
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).detail || msg; } catch {}
@@ -142,7 +145,7 @@ async function upload(file) {
     $(".remove", el).onclick = async () => {
       el._mixer?.destroy();
       el.remove();
-      try { await fetch(`/api/jobs/${job.id}`, { method: "DELETE" }); } catch {}
+      try { await fetch(`/api/jobs/${job.id}`, { method: "DELETE", headers: APP_HEADERS }); } catch {}
     };
     poll(job.id, el);
   } catch (e) {
