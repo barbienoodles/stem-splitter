@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stem-splitter"
+version = "0.1.0"
+description = "Separazione di brani in stem (voce, batteria, basso, chitarra, piano, altro) in locale, su Intel e Apple Silicon."
+readme = "README.md"
+# Intel Mac: PyTorch non pubblica più wheel per macOS x86_64 dopo la 2.2.x,
+# che supporta Python fino alla 3.12. Su Apple Silicon / Linux / Windows va bene anche la 3.13.
+requires-python = ">=3.10"
+dependencies = [
+    # Demucs va installato a parte con `pip install --no-deps demucs` (lo fa scripts/install.sh):
+    # la 4.1 dipende da `sphn`, che non ha wheel per Mac Intel e usiamo solo per i file,
+    # cosa che qui fa ffmpeg. Queste sono le dipendenze che servono davvero ai modelli.
+    "einops",
+    "julius>=0.2.3",
+    "pyyaml",
+    "tqdm",
+    # Mac Intel: ultima PyTorch disponibile è la 2.2.x, compilata per NumPy 1.x
+    "torch>=2.1,<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torch>=2.1; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "numpy",
+    "imageio-ffmpeg>=0.5",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+
+[project.scripts]
+stem-splitter = "stem_splitter.cli:main"
+
+[tool.setuptools]
+packages = ["stem_splitter"]
+
+[tool.setuptools.package-data]
+stem_splitter = ["static/*"]
