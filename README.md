@@ -21,7 +21,7 @@ Python né altro.
 | Sistema | File | Requisiti |
 |---|---|---|
 | Mac Apple Silicon | `StemSplitter-…-macOS-AppleSilicon.dmg` | macOS 11 o successivo |
-| Mac Intel | `StemSplitter-…-macOS-Intel.dmg` | macOS 10.15 o successivo |
+| Mac Intel | `StemSplitter-…-macOS-Intel.dmg` | macOS 10.13 High Sierra o successivo |
 | Windows 10/11 (64 bit) | `StemSplitter-…-Windows-Setup.exe` | nessun permesso di amministratore |
 | Linux (x86_64) | `StemSplitter-…-Linux-x86_64.AppImage` | glibc 2.35+ (Ubuntu 22.04 o più recente) |
 

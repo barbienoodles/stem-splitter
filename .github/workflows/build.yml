@@ -48,6 +48,9 @@ jobs:
             arch: Intel
             # ultima PyTorch per Mac Intel, compilata per NumPy 1.x
             torch: torch==2.2.2 "numpy<2"
+            # Python ufficiale di python.org: funziona da macOS 10.13 High Sierra
+            pyorg: "3.12.10"
+            macos_min: "10.13"
           - name: Windows
             os: windows-2022
             kind: windows
@@ -63,8 +66,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        if: ${{ !matrix.pyorg }}
         with:
           python-version: "3.12"
+
+      - name: Python di python.org (compatibile con i Mac più vecchi)
+        if: ${{ matrix.pyorg }}
+        run: |
+          v=${{ matrix.pyorg }}
+          curl -fsSLO "https://www.python.org/ftp/python/$v/python-$v-macos11.pkg"
+          sudo installer -pkg "python-$v-macos11.pkg" -target /
+          py=/Library/Frameworks/Python.framework/Versions/${v%.*}/bin/python${v%.*}
+          "$py" -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_min }}" >> "$GITHUB_ENV"
 
       - name: Versione
         id: ver
@@ -88,6 +103,12 @@ jobs:
       - name: Self-test (app)
         if: matrix.kind == 'mac'
         run: '"dist/Stem Splitter.app/Contents/MacOS/StemSplitter" --self-test'
+
+      - name: Compatibilità con macOS ${{ matrix.macos_min }}
+        if: matrix.kind == 'mac' && matrix.macos_min
+        run: |
+          python packaging/check_macos_min.py "dist/Stem Splitter.app" --max ${{ matrix.macos_min }}
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "dist/Stem Splitter.app/Contents/Info.plist"'
 
       - name: DMG
         if: matrix.kind == 'mac'

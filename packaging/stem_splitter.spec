@@ -64,9 +64,9 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleDisplayName": "Stem Splitter",
             "CFBundleShortVersionString": VERSION,
-            # Intel: Python 3.12 di python.org, PyTorch 2.2 e PyInstaller arrivano a macOS 10.15;
-            # i Mac Apple Silicon partono comunque da macOS 11
-            "LSMinimumSystemVersion": "11.0" if platform.machine() == "arm64" else "10.15",
+            # Intel: Python 3.12 di python.org e PyTorch 2.2 funzionano da macOS 10.13 High Sierra
+            # (la CI lo verifica con packaging/check_macos_min.py); Apple Silicon parte da macOS 11
+            "LSMinimumSystemVersion": "11.0" if platform.machine() == "arm64" else "10.13",
             # l'interfaccia è nel browser: niente icona nel Dock né menu "non risponde"
             "LSUIElement": True,
             "NSHighResolutionCapable": True,
