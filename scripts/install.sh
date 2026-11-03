@@ -5,50 +5,70 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OS="$(uname -s)"
-ARCH="$(uname -m)"
+# Si guarda l'hardware, non l'architettura della shell: un Mac Apple Silicon ha hw.optional.arm64=1
+# anche quando il Terminale gira sotto Rosetta.
+APPLE_SILICON=0
+if [[ "$OS" == "Darwin" && "$(sysctl -in hw.optional.arm64 2>/dev/null)" == "1" ]]; then
+  APPLE_SILICON=1
+fi
 
-# Un Mac Apple Silicon che esegue il terminale sotto Rosetta si presenta come x86_64:
-# in quel caso PyTorch non userebbe la GPU (MPS) e sarebbe limitato alla versione Intel.
-if [[ "$OS" == "Darwin" && "$ARCH" == "x86_64" ]] && [[ "$(sysctl -in sysctl.proc_translated 2>/dev/null)" == "1" ]]; then
+# Sotto Rosetta anche un Python universal2 partirebbe come x86_64 e installerebbe la PyTorch Intel.
+if (( APPLE_SILICON )) && [[ "$(sysctl -in sysctl.proc_translated 2>/dev/null)" == "1" ]]; then
   echo "⚠️  Il terminale gira sotto Rosetta su un Mac Apple Silicon."
   echo "   Riapri il Terminale senza Rosetta (Info → deseleziona 'Apri con Rosetta') e rilancia lo script."
   exit 1
 fi
 
 # PyTorch per Mac Intel esiste solo fino alla 2.2.x, che supporta Python 3.10–3.12.
-if [[ "$OS" == "Darwin" && "$ARCH" == "x86_64" ]]; then
+if [[ "$OS" == "Darwin" ]] && (( ! APPLE_SILICON )); then
   CANDIDATES=(python3.12 python3.11 python3.10 python3)
   MAX_MINOR=12
   echo "🖥  Mac Intel rilevato: verrà usata la CPU."
 else
-  CANDIDATES=(python3.12 python3.13 python3.11 python3.10 python3)
+  # su Apple Silicon prima l'Homebrew nativo, poi quello che c'è nel PATH
+  CANDIDATES=(/opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.11
+              python3.12 python3.13 python3.11 python3.10 python3)
   MAX_MINOR=13
-  if [[ "$OS" == "Darwin" ]]; then echo "🍏 Mac Apple Silicon rilevato: verrà usata la GPU (Metal/MPS)."; fi
+  if (( APPLE_SILICON )); then echo "🍏 Mac Apple Silicon rilevato: verrà usata la GPU (Metal/MPS)."; fi
 fi
 
 PY=""
+SKIPPED_X86=""
 for c in "${CANDIDATES[@]}"; do
-  if command -v "$c" >/dev/null 2>&1; then
-    minor="$("$c" -c 'import sys; print(sys.version_info.minor if sys.version_info.major == 3 else 0)')"
-    if (( minor >= 10 && minor <= MAX_MINOR )); then PY="$c"; break; fi
+  command -v "$c" >/dev/null 2>&1 || continue
+  read -r minor machine < <("$c" -c 'import platform, sys; print(sys.version_info.minor if sys.version_info.major == 3 else 0, platform.machine())')
+  (( minor >= 10 && minor <= MAX_MINOR )) || continue
+  # un Python x86_64 (es. vecchio Homebrew in /usr/local) su Apple Silicon girerebbe in Rosetta
+  if (( APPLE_SILICON )) && [[ "$machine" != "arm64" ]]; then
+    SKIPPED_X86+=" $(command -v "$c")"
+    continue
   fi
+  PY="$c"
+  break
 done
 
 if [[ -z "$PY" ]]; then
-  echo "❌ Serve Python 3.10–3.$MAX_MINOR."
+  echo "❌ Serve Python 3.10–3.$MAX_MINOR$( (( APPLE_SILICON )) && echo ' nativo arm64')."
+  if [[ -n "$SKIPPED_X86" ]]; then
+    echo "   Ignorati perché Intel (x86_64), girerebbero in Rosetta senza GPU:$SKIPPED_X86"
+  fi
   echo "   Su Mac: brew install python@3.12   (oppure scaricalo da python.org)"
   exit 1
 fi
 echo "🐍 Uso $("$PY" --version) ($PY)"
 
-"$PY" -m venv .venv
+# --clear: un .venv creato in precedenza con un Python di altra architettura va rifatto
+"$PY" -m venv --clear .venv
 .venv/bin/python -m pip install --upgrade pip wheel >/dev/null
 .venv/bin/python -m pip install -e .
 # senza dipendenze: evita `sphn`, che su Mac Intel non ha wheel (vedi pyproject.toml)
 .venv/bin/python -m pip install --no-deps "demucs>=4.1.0,<5"
 
-.venv/bin/python - <<'PY'
+.venv/bin/python - "$APPLE_SILICON" <<'PY'
+import platform, sys
 from stem_splitter.device import pick_device
+if sys.argv[1] == "1" and platform.machine() != "arm64":
+    sys.exit(f"❌ L'ambiente usa un Python {platform.machine()}: su Apple Silicon serve arm64.")
 print("✅ Installazione completata. Dispositivo:", pick_device().label)
 PY
 echo

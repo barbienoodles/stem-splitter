@@ -46,6 +46,14 @@ def test_model_choice():
     assert model_name_for("guitar", "high") == "htdemucs_6s"
 
 
+def test_quality_levels_differ_for_six_stems():
+    from stem_splitter.separator import QUALITIES
+
+    six = [QUALITIES[k].plan(True) for k in ("standard", "high", "max")]
+    assert len(set(six)) == 3  # ogni livello cambia davvero qualcosa anche con chitarra/piano
+    assert [round(QUALITIES[k].cost(False)) for k in ("standard", "high", "max")] == [1, 4, 12]
+
+
 @pytest.mark.parametrize("ext,args", [
     (".mp4", ["-f", "lavfi", "-i", "color=c=black:s=64x64:d=3", "-c:v", "libx264", "-c:a", "aac", "-shortest"]),
     (".aac", ["-c:a", "aac"]),
@@ -213,3 +221,125 @@ def test_api(song, tmp_path):
             break
         time.sleep(0.1)
     assert job["status"] == "error"
+
+
+# --- regressioni dalla code review -------------------------------------------------------
+
+
+def _const_run(model, levels):
+    return lambda m, mix, sh, ov, r: torch.stack([mix * levels[s] for s in model.sources])
+
+
+def test_common_gain_keeps_stems_and_mid_side_consistent(song, tmp_path, monkeypatch):
+    """Con uscita intera, un solo guadagno per tutti i file: le somme e M/S restano valide."""
+    sep = FakeSeparator("cpu")
+    model = sep.load_model("htdemucs")
+    # stem molto forti: senza guadagno comune il clipping/normalizzazione per file è certo
+    levels = {"drums": 3.0, "bass": 2.0, "other": 1.0, "vocals": 0.5}
+    monkeypatch.setattr(sep, "_run", _const_run(model, levels))
+    out = sep.separate(song, tmp_path, stem="vocals", fmt="wav", bit_depth="24", midside="stems")
+    v, i = load_audio(out["vocals"], SR), load_audio(out["instrumental"], SR)
+    assert np.abs(i).max() < 1.0 and np.abs(v).max() < 1.0
+    # rapporto tra stem invariato (3+2+1 = 6 volte la voce)
+    ratio = np.abs(i).max() / np.abs(v).max()
+    assert abs(ratio - 12.0) < 0.05, ratio
+    mid = load_audio(out["instrumental_mid"], SR, 1)[0]
+    side = load_audio(out["instrumental_side"], SR, 1)[0]
+    assert np.allclose(mid + side, i[0], atol=1e-4) and np.allclose(mid - side, i[1], atol=1e-4)
+
+
+def test_float_output_keeps_original_level(song, tmp_path, monkeypatch):
+    sep = FakeSeparator("cpu")
+    model = sep.load_model("htdemucs")
+    monkeypatch.setattr(sep, "_run", _const_run(model, {"drums": 3.0, "bass": 0, "other": 0, "vocals": 0}))
+    out = sep.separate(song, tmp_path, stem="drums", fmt="wav", bit_depth="32f")
+    assert np.abs(load_audio(out["drums"], SR)).max() > 1.0  # il float conserva gli over
+
+
+@pytest.mark.parametrize("rate", [48000, 96000])
+def test_no_clipping_after_resampling(tmp_path, monkeypatch, rate):
+    """Un'onda quadra quasi a fondo scala genera over inter-campione nel ricampionamento."""
+    t = np.arange(SR * 3) / SR
+    sq = (0.999 * np.sign(np.sin(2 * np.pi * 997 * t))).astype(np.float32)
+    src = save_audio(np.stack([sq, sq]), tmp_path / "sq", SR, "wav", bit_depth="32f")
+    sep = FakeSeparator("cpu")
+    model = sep.load_model("htdemucs")
+    levels = {"drums": 0, "bass": 0, "other": 0, "vocals": 1.0}
+    monkeypatch.setattr(sep, "_run", _const_run(model, levels))
+    out = sep.separate(src, tmp_path / "o", stem="vocals", fmt="wav", samplerate=rate, bit_depth="24")
+    raw = subprocess.run([ffmpeg_exe(), "-v", "error", "-i", str(out["vocals"]), "-f", "f32le", "-"],
+                         capture_output=True, check=True).stdout
+    peak = np.abs(np.frombuffer(raw, np.float32)).max()
+    assert peak < 0.9999, peak  # nessun campione bloccato a fondo scala
+
+
+def _wait(client, job_id, statuses=("done", "error"), timeout=30):
+    for _ in range(int(timeout * 10)):
+        r = client.get(f"/api/jobs/{job_id}")
+        if r.status_code == 404 or r.json()["status"] in statuses:
+            return r
+        time.sleep(0.1)
+    raise AssertionError("timeout")
+
+
+def test_zip_is_written_to_disk_not_memory(song, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from stem_splitter.server import create_app
+
+    client = TestClient(create_app(FakeSeparator("cpu"), tmp_path / "jobs"))
+    with open(song, "rb") as f:
+        job_id = client.post("/api/jobs", files={"file": ("s.mp3", f)}).json()["id"]
+    _wait(client, job_id)
+    r = client.get(f"/api/jobs/{job_id}/zip")
+    assert r.status_code == 200 and r.content[:2] == b"PK"
+    assert list((tmp_path / "jobs" / job_id).glob("*.zip"))  # file su disco, riusato
+
+
+def test_old_job_dirs_are_purged(tmp_path):
+    import os
+
+    from stem_splitter.jobs import JobManager
+
+    work = tmp_path / "jobs"
+    old, new = work / "oldjob", work / "newjob"
+    old.mkdir(parents=True)
+    new.mkdir()
+    (old / "input.mp3").write_bytes(b"x")
+    past = time.time() - 3 * 24 * 3600
+    os.utime(old, (past, past))
+    JobManager(FakeSeparator("cpu"), work, ttl_hours=24)
+    assert not old.exists() and new.exists()
+
+
+class SlowSeparator(FakeSeparator):
+    def _run(self, model, mix, shifts, overlap, report):
+        for i in range(200):
+            time.sleep(0.05)
+            report(0.08 + 0.004 * i, "lento")
+        return torch.stack([mix] * len(model.sources))
+
+
+def test_delete_cancels_running_job(song, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from stem_splitter.server import create_app
+
+    work = tmp_path / "jobs"
+    client = TestClient(create_app(SlowSeparator("cpu"), work))
+    with open(song, "rb") as f:
+        slow = client.post("/api/jobs", files={"file": ("a.mp3", f)}).json()["id"]
+    with open(song, "rb") as f:
+        nxt = client.post("/api/jobs", files={"file": ("b.mp3", f)}).json()["id"]
+    _wait(client, slow, statuses=("running",))
+    time.sleep(0.3)
+    start = time.time()
+    assert client.delete(f"/api/jobs/{slow}").status_code == 200
+    # il lavoro successivo parte subito invece di aspettare i ~10 s del primo
+    _wait(client, nxt, statuses=("running", "done"), timeout=5)
+    assert time.time() - start < 3
+    for _ in range(30):
+        if not (work / slow).exists():
+            break
+        time.sleep(0.1)
+    assert not (work / slow).exists()

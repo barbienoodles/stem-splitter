@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import io
 import os
 import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -43,6 +44,10 @@ def create_app(separator: Separator | None = None, workdir: Path | None = None) 
                        "six_stems": o.six_stems} for o in STEM_OPTIONS.values()],
             "default_stem": DEFAULT_STEM,
             "qualities": {k: q.label for k, q in QUALITIES.items()},
+            "quality_details": {k: {
+                "4": {"model": q.plan(False)[0], "shifts": q.plan(False)[1], "cost": q.cost(False)},
+                "6": {"model": q.plan(True)[0], "shifts": q.plan(True)[1], "cost": q.cost(True)},
+                "overlap": q.overlap} for k, q in QUALITIES.items()},
             "formats": list(FORMATS),
             "samplerates": list(SAMPLE_RATES),
             "bit_depths": list(BIT_DEPTHS),
@@ -73,21 +78,14 @@ def create_app(separator: Separator | None = None, workdir: Path | None = None) 
         except ValueError as exc:
             raise HTTPException(400, str(exc))
 
-        limit = MAX_UPLOAD_MB * 1024 * 1024
-        size = 0
-        with tempfile.NamedTemporaryFile(delete=False, dir=manager.workdir) as tmp:
-            while chunk := await file.read(1024 * 1024):
-                size += len(chunk)
-                if size > limit:
-                    tmp.close()
-                    os.unlink(tmp.name)
-                    raise HTTPException(413, f"File troppo grande (max {MAX_UPLOAD_MB} MB)")
-                tmp.write(chunk)
-        if size == 0:
-            os.unlink(tmp.name)
-            raise HTTPException(400, "File vuoto")
-        job = manager.submit(file.filename or "audio", Path(tmp.name), stem, quality, format,
-                             samplerate, bit_depth, midside)
+        # copia su disco fuori dall'event loop; il file temporaneo non sopravvive a nessun errore
+        tmp_path = await run_in_threadpool(_store_upload, file.file, manager.workdir)
+        try:
+            job = manager.submit(file.filename or "audio", tmp_path, stem, quality, format,
+                                 samplerate, bit_depth, midside)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
         return job.to_dict()
 
     def _job(job_id: str):
@@ -98,7 +96,7 @@ def create_app(separator: Separator | None = None, workdir: Path | None = None) 
 
     @app.get("/api/jobs")
     def list_jobs():
-        return [j.to_dict() for j in sorted(manager.jobs.values(), key=lambda j: -j.created)]
+        return [j.to_dict() for j in sorted(list(manager.jobs.values()), key=lambda j: -j.created)]
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str):
@@ -127,20 +125,41 @@ def create_app(separator: Separator | None = None, workdir: Path | None = None) 
         job = _job(job_id)
         if job.status != "done":
             raise HTTPException(409, "Il lavoro non è ancora completato")
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
-            for name, path in job.outputs.items():
-                zf.write(path, f"{_base_name(job)} - {name}.{job.fmt}")
-        buf.seek(0)
-        filename = f"{_base_name(job)} - stems.zip"
-        return StreamingResponse(buf, media_type="application/zip", headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{_quote(filename)}"})
+        # scritto una volta su disco nella cartella del lavoro e poi servito in streaming
+        zip_path = manager.workdir / job.id / "stems.zip"
+        if not zip_path.exists():
+            part = zip_path.with_suffix(f".{uuid.uuid4().hex}.part")
+            try:
+                with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+                    for name, path in job.outputs.items():
+                        zf.write(path, f"{_base_name(job)} - {name}.{job.fmt}")
+                part.replace(zip_path)  # atomico: richieste concorrenti non vedono zip a metà
+            finally:
+                part.unlink(missing_ok=True)
+        return FileResponse(zip_path, media_type="application/zip",
+                            filename=f"{_base_name(job)} - stems.zip")
 
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app
 
 
-def _quote(s: str) -> str:
-    from urllib.parse import quote
 
-    return quote(s)
+def _store_upload(src, directory: Path) -> Path:
+    """Copia l'upload in un file temporaneo con limite di dimensione; lo rimuove in caso di errore."""
+    limit = MAX_UPLOAD_MB * 1024 * 1024
+    fd, name = tempfile.mkstemp(dir=directory, suffix=".upload")
+    path = Path(name)
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while chunk := src.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, f"File troppo grande (max {MAX_UPLOAD_MB} MB)")
+                out.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "File vuoto")
+        return path
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise

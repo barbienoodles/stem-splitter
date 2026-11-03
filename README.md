@@ -50,10 +50,14 @@ oppure doppio clic su **`Stem Splitter.command`** nel Finder. Si apre il browser
 
 | Opzione | Valori | Note |
 |---|---|---|
-| Profondità di calcolo | Veloce · Alta · Massima | Alta = modello fine-tuned (`htdemucs_ft`, ~4x); Massima = fine-tuned + 2 passaggi + 50% di sovrapposizione (~12x) |
+| Profondità di calcolo | Veloce · Alta · Massima | 4 stem: Alta = `htdemucs_ft` (~4x), Massima = `htdemucs_ft` + 2 passaggi + 50% di sovrapposizione (~12x). Chitarra/piano/6 stem (`htdemucs_6s`): Alta = 2 passaggi (~2x), Massima = 3 passaggi + 50% (~4,5x) |
 | Formato | WAV · FLAC · MP3 320 kbps | |
 | Frequenza di campionamento | 44,1 · 48 · 96 kHz | MP3 al massimo 48 kHz |
 | Profondità in bit | 16 · 24 · 32 bit float | 32 float solo WAV (conserva i picchi oltre 0 dBFS); 16 bit con dither TPDF |
+
+Con uscite intere (16/24 bit, MP3) i picchi vengono misurati **dopo** il ricampionamento e, se
+necessario, a tutti i file del lavoro si applica **lo stesso guadagno** (tetto −0,04 dBFS, −1 dBFS
+per l'MP3): gli stem continuano a sommarsi al mix e Mid/Side a ricostruire L/R.
 | Mid/Side | No · del mix · del mix e di ogni stem | stile iZotope Ozone: Mid = (L+R)/2, Side = (L−R)/2, file mono; L = M+S, R = M−S |
 
 I modelli Demucs lavorano internamente a 44,1 kHz: a 48/96 kHz l'uscita viene ricampionata
@@ -79,7 +83,7 @@ con SoX VHQ (libsoxr), quindi gli stem non contengono frequenze oltre ~22 kHz.
 Con `--midside mix` si aggiungono `mix_mid` e `mix_side`; con `--midside stems` anche
 `<stem>_mid` e `<stem>_side` per ogni stem.
 
-`-q high|max` usa `htdemucs_ft` (per chitarra/piano si usa sempre `htdemucs_6s`, con più passaggi in `max`).
+`-q high|max` aumenta la profondità di calcolo (vedi tabella sopra).
 `--shifts N` forza il numero di passaggi.
 
 ### Forzare il dispositivo
@@ -90,12 +94,14 @@ STEM_SPLITTER_DEVICE=mps ./scripts/start.sh
 ```
 
 Altre variabili: `STEM_SPLITTER_HOME` (cartella dei lavori, default `~/.stem-splitter`),
-`STEM_SPLITTER_MAX_MB` (dimensione massima upload, default 200).
+`STEM_SPLITTER_MAX_MB` (dimensione massima upload, default 200),
+`STEM_SPLITTER_TTL_HOURS` (dopo quante ore i lavori e i loro file vengono eliminati, default 24;
+`0` per non eliminarli mai).
 
 ## Tempi indicativi (brano di 4 minuti, qualità standard)
 
 Apple Silicon (MPS): circa 20–60 s · Mac Intel recente (CPU): circa 1–3 min.
-La qualità alta richiede circa 4 volte tanto.
+La qualità Alta richiede circa 4 volte tanto, la Massima circa 12.
 
 ## Sviluppo
 
@@ -120,4 +126,4 @@ I test usano un piccolo HTDemucs con pesi casuali, quindi non scaricano nulla.
 | GET | `/api/jobs/{id}` | stato, avanzamento, elenco stem |
 | GET | `/api/jobs/{id}/stems/{nome}` | scarica uno stem |
 | GET | `/api/jobs/{id}/zip` | scarica tutti gli stem |
-| DELETE | `/api/jobs/{id}` | elimina il lavoro e i file |
+| DELETE | `/api/jobs/{id}` | elimina il lavoro e i file (se è in corso lo interrompe) |

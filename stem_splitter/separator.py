@@ -10,7 +10,7 @@ from typing import Callable
 
 import torch
 
-from .audio import load_audio, save_audio, validate_output
+from .audio import PEAK_CEILING, load_audio, measure_peak, save_audio, validate_output
 from .device import DeviceInfo, configure_threads, pick_device
 
 ProgressFn = Callable[[float, str], None]
@@ -53,22 +53,35 @@ STEM_OPTIONS: dict[str, StemOption] = {
 DEFAULT_STEM = "vocals_drums"
 
 
+SIX_STEM_MODEL = "htdemucs_6s"  # unico modello con chitarra e piano
+MODEL_COST = {"htdemucs": 1, "htdemucs_ft": 4, SIX_STEM_MODEL: 1}  # htdemucs_ft = 4 modelli
+
+
 @dataclass(frozen=True)
 class Quality:
     key: str
     label: str
     model4: str  # modello per le opzioni a 4 stem
-    shifts: int  # passaggi con spostamento temporale casuale, poi mediati
+    shifts4: int  # passaggi con spostamento temporale casuale, poi mediati (4 stem)
+    shifts6: int  # idem con il modello a 6 stem, che non ha una versione fine-tuned
     overlap: float  # sovrapposizione tra i segmenti analizzati
+
+    def plan(self, six_stems: bool) -> tuple[str, int]:
+        return (SIX_STEM_MODEL, self.shifts6) if six_stems else (self.model4, self.shifts4)
+
+    def cost(self, six_stems: bool) -> float:
+        """Tempo relativo rispetto a "Veloce" (stesso tipo di separazione)."""
+        model, shifts = self.plan(six_stems)
+        return MODEL_COST[model] * shifts * 0.75 / (1 - self.overlap)
 
 
 # "Profondità di calcolo": più passaggi e più sovrapposizione = meno artefatti, più tempo.
 QUALITIES: dict[str, Quality] = {
     q.key: q
     for q in [
-        Quality("standard", "Veloce", "htdemucs", 1, 0.25),
-        Quality("high", "Alta (~4x più lenta)", "htdemucs_ft", 1, 0.25),
-        Quality("max", "Massima (~12x più lenta)", "htdemucs_ft", 2, 0.5),
+        Quality("standard", "Veloce", "htdemucs", 1, 1, 0.25),
+        Quality("high", "Alta", "htdemucs_ft", 1, 2, 0.25),
+        Quality("max", "Massima", "htdemucs_ft", 2, 3, 0.5),
     ]
 }
 
@@ -80,9 +93,7 @@ MIDSIDE_MODES = {
 
 
 def model_name_for(stem: str, quality: str) -> str:
-    if STEM_OPTIONS[stem].six_stems:
-        return "htdemucs_6s"  # unico modello con chitarra e piano
-    return QUALITIES[quality].model4
+    return QUALITIES[quality].plan(STEM_OPTIONS[stem].six_stems)[0]
 
 
 def mid_side(wav: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -141,7 +152,7 @@ class Separator:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
-            name = model_name_for(stem, quality)
+            name, default_shifts = q.plan(option.six_stems)
             report(0.02, f"Carico il modello {name}…")
             model = self.load_model(name)
             sr = model.samplerate  # i modelli lavorano a 44.1 kHz
@@ -155,7 +166,7 @@ class Separator:
             std = std if std > 1e-8 else torch.tensor(1.0)
             mix = (wav - mean) / std
 
-            sources = self._run(model, mix, shifts or q.shifts, q.overlap, report)
+            sources = self._run(model, mix, shifts or default_shifts, q.overlap, report)
             by_name = dict(zip(model.sources, sources))  # [channels, samples] ciascuno
 
             tracks: dict[str, torch.Tensor] = {}
@@ -171,11 +182,20 @@ class Separator:
             if midside in ("mix", "stems"):
                 tracks["mix_mid"], tracks["mix_side"] = mid_side(wav)
 
+            gain = 1.0
+            if not (fmt == "wav" and bit_depth == "32f"):  # il float conserva gli over
+                report(0.93, "Controllo i picchi…")
+                peak = max(measure_peak(t.numpy(), sr, samplerate) for t in tracks.values())
+                if peak > PEAK_CEILING[fmt]:
+                    # un unico guadagno per tutti i file: restano coerenti fra loro
+                    gain = PEAK_CEILING[fmt] / peak
+
             outputs: dict[str, Path] = {}
             for i, (out_name, track) in enumerate(tracks.items()):
-                report(0.93 + 0.07 * i / len(tracks), "Salvo i file…")
+                report(0.94 + 0.06 * i / len(tracks), "Salvo i file…")
                 outputs[out_name] = save_audio(track.numpy(), output_dir / out_name, sr, fmt,
-                                               out_samplerate=samplerate, bit_depth=bit_depth)
+                                               out_samplerate=samplerate, bit_depth=bit_depth,
+                                               gain=gain)
             report(1.0, "Fatto")
             return outputs
 

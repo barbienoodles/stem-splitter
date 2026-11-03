@@ -102,9 +102,14 @@ function updateOptions() {
   if (bits.selectedOptions[0]?.disabled) bits.value = "24";
 
   const hints = [];
-  const q = $("#quality").value;
-  if (q === "high") hints.push("Alta: modello fine-tuned, circa 4 volte più lento.");
-  if (q === "max") hints.push("Massima: modello fine-tuned, 2 passaggi e 50% di sovrapposizione, circa 12 volte più lento.");
+  const q = $("#quality").value, d = info.quality_details[q];
+  const six = info.stems.find((s) => s.key === state.stem)?.six_stems;
+  const plan = d[six ? "6" : "4"];
+  if (q !== "standard") {
+    const parts = [`modello ${plan.model}`, `${plan.shifts} ${plan.shifts > 1 ? "passaggi" : "passaggio"}`,
+      `${Math.round(d.overlap * 100)}% di sovrapposizione`];
+    hints.push(`${info.qualities[q]}: ${parts.join(", ")}, circa ${+plan.cost.toFixed(1)} volte il tempo di "Veloce".`);
+  }
   if (+rate.value > 44100) hints.push("La separazione avviene a 44,1 kHz; l'uscita viene ricampionata con SoX VHQ.");
   if (fmt === "mp3") hints.push("MP3 a 320 kbps.");
   if ($("#midside").value !== "off") hints.push("Mid = (L+R)/2, Side = (L−R)/2, file mono. Nel mixer partono in muto.");
@@ -201,13 +206,14 @@ class Mixer {
         <a class="dl" title="Scarica" download>⤓</a>`;
       $(".track-name", row).textContent = trackLabel(s.name);
       $(".dl", row).href = s.url;
-      // le tracce Mid/Side duplicano il contenuto degli stem: partono in muto
+      // le tracce Mid/Side duplicano il contenuto degli stem: partono in muto e vengono
+      // scaricate/decodificate solo quando servono, per non occupare memoria inutilmente
       const isMS = /_(mid|side)$/.test(s.name);
       if (isMS) { row.classList.add("ms"); $(".m", row).classList.add("on"); }
       const t = { ...s, row, color: COLORS[i % COLORS.length], muted: isMS, solo: false, vol: 1,
-        canvas: $("canvas", row), buffer: null, gain: null, src: null, peaks: null };
-      $(".m", row).onclick = (e) => { t.muted = !t.muted; e.target.classList.toggle("on", t.muted); this.updateGains(); };
-      $(".s", row).onclick = (e) => { t.solo = !t.solo; e.target.classList.toggle("on", t.solo); this.updateGains(); };
+        lazy: isMS, loading: null, canvas: $("canvas", row), buffer: null, gain: null, src: null, peaks: null };
+      $(".m", row).onclick = (e) => { t.muted = !t.muted; e.target.classList.toggle("on", t.muted); this.changed(t); };
+      $(".s", row).onclick = (e) => { t.solo = !t.solo; e.target.classList.toggle("on", t.solo); this.changed(t); };
       $(".vol", row).oninput = (e) => { t.vol = +e.target.value; this.updateGains(); };
       t.canvas.onclick = (e) => {
         const r = t.canvas.getBoundingClientRect();
@@ -223,27 +229,69 @@ class Mixer {
   async load() {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     this.timeEl.textContent = "Carico l'anteprima…";
-    await Promise.all(this.tracks.map(async (t) => {
-      const data = await (await fetch(t.url)).arrayBuffer();
-      t.buffer = await audioCtx.decodeAudioData(data);
-      t.gain = audioCtx.createGain();
-      t.gain.connect(audioCtx.destination);
-      t.peaks = computePeaks(t.buffer, 800);
-    }));
-    this.duration = Math.max(...this.tracks.map((t) => t.buffer.duration));
+    await Promise.all(this.tracks.filter((t) => !t.lazy).map((t) => this.loadTrack(t)));
+    this.duration = Math.max(...this.tracks.filter((t) => t.buffer).map((t) => t.buffer.duration));
     this.playBtn.disabled = false;
     this.updateGains();
     this.draw();
-    this.tick();
+    this.updateTime();
+  }
+
+  loadTrack(t) {
+    t.loading = t.loading || (async () => {
+      const res = await fetch(t.url);
+      if (!res.ok) throw new Error(res.statusText);
+      t.buffer = await audioCtx.decodeAudioData(await res.arrayBuffer());
+      t.gain = audioCtx.createGain();
+      t.gain.gain.value = 0;
+      t.gain.connect(audioCtx.destination);
+      t.peaks = computePeaks(t.buffer, 800);
+    })();
+    return t.loading;
+  }
+
+  audible(t) {
+    const anySolo = this.tracks.some((x) => x.solo);
+    return !t.muted && (!anySolo || t.solo);
+  }
+
+  // Mute/solo cambiati: carica al volo le tracce M/S appena diventano udibili.
+  async changed(t) {
+    this.updateGains();
+    const pending = this.tracks.filter((x) => x.lazy && !x.buffer && this.audible(x));
+    if (!pending.length) return;
+    pending.forEach((x) => (x.row.querySelector(".track-name").dataset.loading = "1"));
+    this.draw();
+    try {
+      await Promise.all(pending.map((x) => this.loadTrack(x)));
+    } catch (e) {
+      this.timeEl.textContent = `Traccia non disponibile: ${e.message}`;
+      return;
+    } finally {
+      pending.forEach((x) => delete x.row.querySelector(".track-name").dataset.loading);
+    }
+    if (this.playing) {
+      const when = audioCtx.currentTime + 0.05;
+      for (const x of pending) if (!x.src) this.startTrack(x, when, when - this.startedAt);
+    }
+    this.updateGains();
+    this.draw();
+  }
+
+  startTrack(t, when, offset) {
+    t.src = audioCtx.createBufferSource();
+    t.src.buffer = t.buffer;
+    t.src.connect(t.gain);
+    t.src.start(when, Math.max(0, offset));
   }
 
   updateGains() {
     const anySolo = this.tracks.some((t) => t.solo);
     for (const t of this.tracks) {
-      if (!t.gain) continue;
       const on = !t.muted && (!anySolo || t.solo);
-      t.gain.gain.setTargetAtTime(on ? t.vol : 0, audioCtx.currentTime, 0.015);
       t.row.style.opacity = on ? 1 : 0.45;
+      if (!t.gain) continue;
+      t.gain.gain.setTargetAtTime(on ? t.vol : 0, audioCtx.currentTime, 0.015);
     }
   }
 
@@ -256,15 +304,11 @@ class Mixer {
     if (audioCtx.state === "suspended") audioCtx.resume();
     if (this.offset >= this.duration) this.offset = 0;
     const when = audioCtx.currentTime + 0.05;
-    for (const t of this.tracks) {
-      t.src = audioCtx.createBufferSource();
-      t.src.buffer = t.buffer;
-      t.src.connect(t.gain);
-      t.src.start(when, this.offset);
-    }
+    for (const t of this.tracks) if (t.buffer) this.startTrack(t, when, this.offset);
     this.startedAt = when - this.offset;
     this.playing = true;
     this.playBtn.textContent = "❚❚";
+    requestAnimationFrame(() => this.tick());
   }
 
   pause() {
@@ -272,6 +316,8 @@ class Mixer {
     this.stopSources();
     this.playing = false;
     this.playBtn.textContent = "▶";
+    this.updateTime();
+    this.draw();
   }
 
   stopSources() {
@@ -288,16 +334,25 @@ class Mixer {
     this.offset = Math.max(0, Math.min(time, this.duration));
     if (was) this.play();
     this.draw();
+    this.updateTime();
   }
 
+  updateTime() {
+    this.timeEl.textContent = `${fmtTime(this.position())} / ${fmtTime(this.duration)}`;
+  }
+
+  // Animazione solo durante la riproduzione: si ferma da sola in pausa.
   tick() {
-    if (this.destroyed) return;
-    if (this.playing && this.position() >= this.duration) {
+    if (this.destroyed || !this.playing) return;
+    if (this.position() >= this.duration) {
       this.pause();
       this.offset = 0;
+      this.updateTime();
+      this.draw();
+      return;
     }
-    this.timeEl.textContent = `${fmtTime(this.position())} / ${fmtTime(this.duration)}`;
-    if (this.playing) this.draw();
+    this.updateTime();
+    this.draw();
     requestAnimationFrame(() => this.tick());
   }
 
@@ -311,7 +366,14 @@ class Mixer {
       const g = c.getContext("2d");
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, w, h);
-      if (!t.peaks) continue;
+      if (!t.peaks) {
+        g.fillStyle = "#59607a";
+        g.font = "12px -apple-system, sans-serif";
+        g.textBaseline = "middle";
+        const loading = t.row.querySelector(".track-name").dataset.loading;
+        g.fillText(loading ? "Caricamento…" : t.lazy ? "Togli il muto (M) o premi S per caricarla" : "", 8, h / 2);
+        continue;
+      }
       const n = t.peaks.length, bw = w / n, mid = h / 2, cut = frac * w;
       for (let i = 0; i < n; i++) {
         const x = i * bw, a = Math.max(1, t.peaks[i] * mid);

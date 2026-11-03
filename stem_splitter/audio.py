@@ -10,8 +10,10 @@ MP4, MOV, MKV, WEBM, FLAC, OGG, OPUS, AIFF, WMA, CAF… (da un video prende la t
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -66,8 +68,6 @@ def probe_samplerate(path: str | Path) -> int | None:
     """Frequenza di campionamento originale del file (None se non determinabile)."""
     proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", "-i", str(path)],
                           capture_output=True, text=True)
-    import re
-
     m = re.search(r"Audio:.*?(\d{4,6}) Hz", proc.stderr)
     return int(m.group(1)) if m else None
 
@@ -89,6 +89,47 @@ def load_audio(path: str | Path, samplerate: int, channels: int = 2) -> np.ndarr
     if data.size == 0:
         raise ValueError("Il file non contiene audio.")
     return data.reshape(-1, channels).T.copy()
+
+
+# Tetto per le uscite intere: misurato dopo il ricampionamento, quindi basta un margine minimo.
+# L'MP3 ha bisogno di più spazio perché la codifica stessa crea over (−1 dBTP).
+PEAK_CEILING = {"wav": 0.995, "flac": 0.995, "mp3": 0.891}
+
+
+def measure_peak(wav: np.ndarray, samplerate: int, out_samplerate: int | None = None) -> float:
+    """Picco assoluto del segnale come sarà dopo il ricampionamento (over inter-campione inclusi).
+
+    Il ricampionamento avviene in streaming: non serve tenere in memoria la versione a 96 kHz.
+    """
+    wav = np.asarray(wav, dtype=np.float32)
+    if wav.size == 0:
+        return 0.0
+    peak = float(np.max(np.abs(wav)))
+    if not out_samplerate or out_samplerate == samplerate:
+        return peak
+    cmd = [
+        ffmpeg_exe(), "-nostdin", "-v", "error",
+        "-f", "f32le", "-ar", str(samplerate), "-ac", str(wav.shape[0]), "-i", "-",
+        *_resample_filter(out_samplerate), "-f", "f32le", "-",
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    data = np.ascontiguousarray(wav.T).tobytes()
+
+    def feed() -> None:
+        try:
+            proc.stdin.write(data)
+        finally:
+            proc.stdin.close()
+
+    writer = threading.Thread(target=feed, daemon=True)
+    writer.start()
+    while chunk := proc.stdout.read(1 << 20):
+        chunk = chunk[: len(chunk) - len(chunk) % 4]
+        if chunk:
+            peak = max(peak, float(np.max(np.abs(np.frombuffer(chunk, np.float32)))))
+    writer.join()
+    proc.wait()
+    return peak
 
 
 def _codec_args(fmt: str, bit_depth: str) -> list[str]:
@@ -122,8 +163,13 @@ def save_audio(
     fmt: str = "wav",
     out_samplerate: int | None = None,
     bit_depth: str = "24",
+    gain: float = 1.0,
 ) -> Path:
-    """Salva float32 [channels, samples] (a `samplerate`) ricampionando a `out_samplerate`."""
+    """Salva float32 [channels, samples] (a `samplerate`) ricampionando a `out_samplerate`.
+
+    Non normalizza: il guadagno `gain` va deciso dal chiamante, uguale per tutti i file di un
+    lavoro, così gli stem continuano a sommarsi al mix e Mid/Side a ricostruire L/R.
+    """
     out_samplerate = out_samplerate or samplerate
     if fmt not in FORMATS or bit_depth not in BIT_DEPTHS:
         raise ValueError(f"Formato non supportato: {fmt} / {bit_depth}")
@@ -131,11 +177,9 @@ def save_audio(
         raise ValueError("L'MP3 supporta al massimo 48 kHz: scegli WAV o FLAC per 96 kHz.")
     path = Path(path).with_suffix(f".{fmt}")
     wav = np.asarray(wav, dtype=np.float32)
+    if gain != 1.0:
+        wav = wav * np.float32(gain)
     channels = wav.shape[0]
-    # con formati interi evita il clipping; il float a 32 bit conserva i picchi > 0 dBFS
-    peak = float(np.max(np.abs(wav))) if wav.size else 0.0
-    if peak > 0.999 and not (fmt == "wav" and bit_depth == "32f"):
-        wav = wav / peak * 0.999
     resample = _resample_filter(out_samplerate) if out_samplerate != samplerate else []
     dither = ["-af", "aresample=dither_method=triangular_hp"] if bit_depth == "16" and not resample else []
     if bit_depth == "16" and resample:
