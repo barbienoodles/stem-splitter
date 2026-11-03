@@ -9,7 +9,11 @@
 <body>
   <header class="top">
     <div class="brand"><span class="logo" aria-hidden="true"></span>Stem Splitter</div>
-    <div class="device" id="device">…</div>
+    <div class="top-right">
+      <div class="device" id="device">…</div>
+      <button class="icon-btn sound" id="sound" type="button" title="Suoni della scimmietta"></button>
+      <button class="btn quit" id="quit" type="button" hidden>Chiudi l'app</button>
+    </div>
   </header>
 
   <main>
@@ -42,11 +46,12 @@
       <p class="hint muted" id="hint"></p>
 
       <h2>2. Carica il brano</h2>
-      <label class="drop" id="drop">
+      <label class="drop scene" id="drop">
         <input type="file" id="file" multiple hidden>
-        <span class="drop-icon" aria-hidden="true"></span>
-        <strong>Trascina qui un file audio</strong>
-        <span class="muted">oppure clicca per sceglierlo · MP3, MP4, WAV, AAC, M4A, FLAC, AIFF, OGG, OPUS, WMA, MOV… (anche più file insieme)</span>
+        <div class="monkey" id="monkey">
+          <div class="mk-bubble" aria-live="polite"></div>
+        </div>
+        <span class="muted">Trascina il brano sulla scimmietta, oppure clicca per sceglierlo · MP3, MP4, WAV, AAC, M4A, FLAC, AIFF, OGG, OPUS, WMA, MOV… (anche più file insieme)</span>
       </label>
     </section>
 
@@ -75,6 +80,7 @@
     </article>
   </template>
 
+  <script src="monkey.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

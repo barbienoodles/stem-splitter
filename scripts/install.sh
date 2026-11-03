@@ -89,6 +89,13 @@ if ! find_python; then
     echo "   (il python3 di sistema richiede gli Strumenti da riga di comando: xcode-select --install)"
   fi
   BREW="$(command -v brew || ls "$BREW_PREFIX/bin/brew" 2>/dev/null || true)"
+  # un Homebrew rotto o non più supportato su questo macOS (es. errori "syntax error … brew.rb")
+  # non va proposto: meglio l'installer di python.org, che non richiede altro
+  if [[ -n "$BREW" ]] && ! "$BREW" --version >/dev/null 2>&1; then
+    echo "   (Homebrew è installato ma non funziona su questo Mac: uso l'installer di python.org)"
+    BREW=""
+  fi
+  if [[ "$(id -u)" == "0" ]]; then BREW=""; fi  # Homebrew non va mai usato come root
   if [[ -n "$BREW" && -t 0 ]]; then
     read -r -p "   Vuoi che installi Python 3.12 con Homebrew? [s/N] " answer
     if [[ "$answer" =~ ^[sSyY] ]]; then
@@ -100,7 +107,8 @@ if ! find_python; then
     if [[ -n "$BREW" ]]; then
       echo "   Installa Python con:  brew install python@3.12"
     elif [[ "$OS" == "Darwin" ]]; then
-      echo "   Scarica e installa Python 3.12 per macOS (l'ultima 3.12 con installer è la 3.12.10):"
+      echo "   Scarica e installa Python 3.12 per macOS: in fondo alla pagina scegli"
+      echo "   'macOS 64-bit universal2 installer' (l'ultima 3.12 con installer è la 3.12.10):"
       echo "   https://www.python.org/downloads/release/python-31210/"
       [[ -t 0 ]] && open "https://www.python.org/downloads/release/python-31210/" 2>/dev/null || true
     else
