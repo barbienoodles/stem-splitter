@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller: `pyinstaller packaging/stem_splitter.spec` dalla radice del repository.
 # Produce dist/Stem Splitter.app (macOS) oppure dist/StemSplitter/ (Windows, Linux).
+import platform
 import sys
 from pathlib import Path
 
@@ -63,7 +64,9 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleDisplayName": "Stem Splitter",
             "CFBundleShortVersionString": VERSION,
-            "LSMinimumSystemVersion": "11.0",
+            # Intel: Python 3.12 di python.org, PyTorch 2.2 e PyInstaller arrivano a macOS 10.15;
+            # i Mac Apple Silicon partono comunque da macOS 11
+            "LSMinimumSystemVersion": "11.0" if platform.machine() == "arm64" else "10.15",
             # l'interfaccia è nel browser: niente icona nel Dock né menu "non risponde"
             "LSUIElement": True,
             "NSHighResolutionCapable": True,

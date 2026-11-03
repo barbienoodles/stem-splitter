@@ -13,7 +13,33 @@ Funziona su:
 
 Il motore di separazione è [Demucs](https://github.com/facebookresearch/demucs) (Hybrid Transformer Demucs, licenza MIT).
 
-## Installazione (Mac)
+## Installazione con l'installer (consigliata)
+
+Scarica il file per il tuo computer dalla pagina **Releases** del repository: non serve installare
+Python né altro.
+
+| Sistema | File | Requisiti |
+|---|---|---|
+| Mac Apple Silicon | `StemSplitter-…-macOS-AppleSilicon.dmg` | macOS 11 o successivo |
+| Mac Intel | `StemSplitter-…-macOS-Intel.dmg` | macOS 10.15 o successivo |
+| Windows 10/11 (64 bit) | `StemSplitter-…-Windows-Setup.exe` | nessun permesso di amministratore |
+| Linux (x86_64) | `StemSplitter-…-Linux-x86_64.AppImage` | glibc 2.35+ (Ubuntu 22.04 o più recente) |
+
+- **Mac:** apri il `.dmg` e trascina *Stem Splitter* in *Applicazioni*. L'app non è firmata con un
+  certificato Apple: la prima volta fai **tasto destro → Apri → Apri**. Se macOS dice che è
+  «danneggiata» o non offre l'opzione, vai in *Impostazioni di Sistema → Privacy e sicurezza*
+  e premi **Apri comunque**.
+- **Windows:** avvia il `Setup.exe`. Se compare «Windows ha protetto il PC», clicca
+  **Ulteriori informazioni → Esegui comunque**.
+- **Linux:** `chmod +x StemSplitter-*.AppImage` e poi avvialo.
+
+L'app apre la pagina nel browser; se è già aperta, la riapre soltanto. Si chiude con il pulsante
+**Chiudi l'app** in alto a destra. I file elaborati e il log stanno in `~/.stem-splitter`.
+
+Gli installer vengono creati da GitHub Actions (`.github/workflows/build.yml`) a ogni push e
+pubblicati automaticamente in una Release quando si crea un tag `v*` (es. `git tag v0.2.0 && git push --tags`).
+
+## Installazione dal codice (Mac e Linux)
 
 ```bash
 git clone https://github.com/barbienoodles/stem-splitter.git
@@ -21,8 +47,14 @@ cd stem-splitter
 ./scripts/install.sh
 ```
 
-Lo script rileva Intel o Apple Silicon e sceglie il Python giusto. Se manca Python:
-`brew install python@3.12`. ffmpeg non serve: è incluso tramite `imageio-ffmpeg`.
+Lo script rileva Intel o Apple Silicon e sceglie il Python giusto (cercandolo anche nelle cartelle di
+Homebrew e di python.org). Se non ne trova uno adatto spiega perché e, se Homebrew funziona,
+propone di installarlo. Senza Homebrew: installer *macOS 64-bit universal2* di
+[Python 3.12.10](https://www.python.org/downloads/release/python-31210/).
+ffmpeg non serve: è incluso tramite `imageio-ffmpeg`.
+
+Se `git` dà l'errore `xcrun: error: invalid active developer path`, mancano gli Strumenti da riga
+di comando di Apple: `xcode-select --install` (oppure scarica lo ZIP da GitHub, pulsante *Code*).
 
 Al primo utilizzo i pesi del modello (~80 MB per htdemucs, ~320 MB per la qualità alta)
 vengono scaricati automaticamente e salvati in cache.
