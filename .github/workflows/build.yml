@@ -108,7 +108,7 @@ jobs:
         if: matrix.kind == 'mac' && matrix.macos_min
         run: |
           python packaging/check_macos_min.py "dist/Stem Splitter.app" --max ${{ matrix.macos_min }}
-          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "dist/Stem Splitter.app/Contents/Info.plist"'
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "dist/Stem Splitter.app/Contents/Info.plist"
 
       - name: DMG
         if: matrix.kind == 'mac'
