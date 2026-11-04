@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import uuid
 import zipfile
@@ -10,7 +11,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -28,6 +29,45 @@ def default_workdir() -> Path:
 
 
 APP_ID = "stem-splitter"
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _host_name(header: str) -> str:
+    """Nome dell'host senza porta: 'localhost:8765' → 'localhost', '[::1]:8765' → '::1'."""
+    header = header.strip().lower()
+    if header.startswith("["):
+        return header[1:header.find("]")] if "]" in header else header
+    return header.rsplit(":", 1)[0] if header.count(":") == 1 else header
+
+
+class HostCheckMiddleware:
+    """Rifiuta le richieste con un Host diverso da quelli attesi.
+
+    Protegge dal DNS rebinding: un sito malevolo può far risolvere il proprio dominio a
+    127.0.0.1 e diventare "stessa origine" della nostra pagina, aggirando il controllo
+    dell'header personalizzato. Il browser però continua a inviare il suo Host (evil.example).
+    """
+
+    def __init__(self, app, allowed_hosts):
+        self.app = app
+        self.allowed = {h.lower().strip("[]") for h in allowed_hosts}
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket") and "*" not in self.allowed:
+            host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
+            if _host_name(host) not in self.allowed:
+                await PlainTextResponse("Host non consentito", status_code=400)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+_UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def safe_name(name: str) -> str:
+    """Nome di file sicuro su Mac, Windows e Linux (anche dentro uno zip)."""
+    name = _UNSAFE_NAME.sub("_", name).strip(" ._")
+    return name[:120] or "audio"
 
 
 def require_app_header(x_stem_splitter: str | None = Header(None)) -> None:
@@ -44,11 +84,13 @@ def create_app(
     separator: Separator | None = None,
     workdir: Path | None = None,
     on_shutdown=None,
+    allowed_hosts=LOCAL_HOSTS,
 ) -> FastAPI:
     separator = separator or Separator()
     manager = JobManager(separator, workdir or default_workdir())
     app = FastAPI(title="Stem Splitter", version=__version__)
     app.state.manager = manager
+    app.add_middleware(HostCheckMiddleware, allowed_hosts=allowed_hosts)
 
     @app.get("/api/info")
     def info():
@@ -135,7 +177,7 @@ def create_app(
         return {"ok": True}
 
     def _base_name(job) -> str:
-        return Path(job.filename).stem or "audio"
+        return safe_name(Path(job.filename.replace("\\", "/")).stem)
 
     @app.get("/api/jobs/{job_id}/stems/{name}")
     def get_stem(job_id: str, name: str):
