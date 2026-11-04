@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import shutil
 import threading
 import time
@@ -15,6 +16,10 @@ from pathlib import Path
 from .separator import Separator
 
 DEFAULT_TTL_HOURS = float(os.environ.get("STEM_SPLITTER_TTL_HOURS", "24"))
+
+
+# solo questi nomi appartengono all'app: la pulizia non tocca nient'altro nella cartella
+OWN_ENTRY = re.compile(r"^(?:[0-9a-f]{12}|tmp[^/]*\.upload)$")
 
 
 class JobCancelled(Exception):
@@ -104,7 +109,7 @@ class JobManager:
                 shutil.rmtree(self.workdir / job.id, ignore_errors=True)
             known = set(self.jobs)
         for entry in self.workdir.iterdir():
-            if entry.name in known:
+            if entry.name in known or not OWN_ENTRY.match(entry.name) or entry.is_symlink():
                 continue
             try:
                 if entry.stat().st_mtime < cutoff:

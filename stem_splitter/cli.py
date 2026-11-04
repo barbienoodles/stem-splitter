@@ -19,9 +19,18 @@ def _serve(args) -> None:
     from .separator import Separator
     from .server import create_app
 
+    from .server import LOCAL_HOSTS
+
     sep = Separator(args.device)
     print(f"Dispositivo: {sep.info.label}")
-    app = create_app(sep)
+    hosts = list(LOCAL_HOSTS)
+    if args.host in ("0.0.0.0", "::"):
+        print("⚠️  In ascolto su tutte le interfacce: chiunque sulla tua rete può usare Stem Splitter "
+              "(non c'è autenticazione).")
+        hosts = ["*"]
+    elif args.host not in LOCAL_HOSTS:
+        hosts.append(args.host)
+    app = create_app(sep, allowed_hosts=hosts)
     url = f"http://{'localhost' if args.host in ('0.0.0.0', '127.0.0.1') else args.host}:{args.port}"
     print(f"Apri {url} nel browser")
     if not args.no_browser:
