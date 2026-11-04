@@ -8,7 +8,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,7 +27,24 @@ def default_workdir() -> Path:
     return Path(os.environ.get("STEM_SPLITTER_HOME", Path.home() / ".stem-splitter")) / "jobs"
 
 
-def create_app(separator: Separator | None = None, workdir: Path | None = None) -> FastAPI:
+APP_ID = "stem-splitter"
+
+
+def require_app_header(x_stem_splitter: str | None = Header(None)) -> None:
+    """Le richieste che modificano qualcosa devono avere un header personalizzato.
+
+    Un header non standard costringe il browser a chiedere il permesso CORS, che non diamo:
+    così un altro sito aperto nel browser non può caricare file o chiudere l'app su localhost.
+    """
+    if x_stem_splitter != "1":
+        raise HTTPException(403, "Richiesta non consentita")
+
+
+def create_app(
+    separator: Separator | None = None,
+    workdir: Path | None = None,
+    on_shutdown=None,
+) -> FastAPI:
     separator = separator or Separator()
     manager = JobManager(separator, workdir or default_workdir())
     app = FastAPI(title="Stem Splitter", version=__version__)
@@ -36,6 +53,8 @@ def create_app(separator: Separator | None = None, workdir: Path | None = None) 
     @app.get("/api/info")
     def info():
         return {
+            "app": APP_ID,
+            "can_shutdown": on_shutdown is not None,
             "version": __version__,
             "device": separator.info.device,
             "device_label": separator.info.label,
@@ -57,7 +76,14 @@ def create_app(separator: Separator | None = None, workdir: Path | None = None) 
             "max_upload_mb": MAX_UPLOAD_MB,
         }
 
-    @app.post("/api/jobs")
+    @app.post("/api/shutdown", dependencies=[Depends(require_app_header)])
+    def shutdown():
+        if on_shutdown is None:
+            raise HTTPException(404, "Non disponibile")
+        on_shutdown()
+        return {"ok": True}
+
+    @app.post("/api/jobs", dependencies=[Depends(require_app_header)])
     async def create_job(
         file: UploadFile = File(...),
         stem: str = Form(DEFAULT_STEM),
@@ -102,7 +128,7 @@ def create_app(separator: Separator | None = None, workdir: Path | None = None) 
     def get_job(job_id: str):
         return _job(job_id).to_dict()
 
-    @app.delete("/api/jobs/{job_id}")
+    @app.delete("/api/jobs/{job_id}", dependencies=[Depends(require_app_header)])
     def delete_job(job_id: str):
         if not manager.delete(job_id):
             raise HTTPException(404, "Lavoro non trovato")

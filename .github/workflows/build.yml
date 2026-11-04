@@ -1,0 +1,206 @@
+name: Test e installer
+
+on:
+  push:
+    branches: [main, "feature/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Test (Linux)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dipendenze
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install ".[dev]"
+          pip install --no-deps "demucs>=4.1.0,<5"
+      - run: pytest -q
+
+  build:
+    name: ${{ matrix.name }}
+    needs: tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            os: macos-15
+            kind: mac
+            arch: AppleSilicon
+            torch: torch
+          - name: macOS Intel
+            os: macos-15-intel
+            kind: mac
+            arch: Intel
+            # ultima PyTorch per Mac Intel, compilata per NumPy 1.x
+            torch: torch==2.2.2 "numpy<2"
+            # Python ufficiale di python.org: funziona da macOS 10.13 High Sierra
+            pyorg: "3.12.10"
+            macos_min: "10.13"
+          - name: Windows
+            os: windows-2022
+            kind: windows
+            torch: torch --index-url https://download.pytorch.org/whl/cpu
+          - name: Linux
+            os: ubuntu-22.04
+            kind: linux
+            torch: torch --index-url https://download.pytorch.org/whl/cpu
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        if: ${{ !matrix.pyorg }}
+        with:
+          python-version: "3.12"
+
+      - name: Python di python.org (compatibile con i Mac più vecchi)
+        if: ${{ matrix.pyorg }}
+        run: |
+          v=${{ matrix.pyorg }}
+          curl -fsSLO "https://www.python.org/ftp/python/$v/python-$v-macos11.pkg"
+          sudo installer -pkg "python-$v-macos11.pkg" -target /
+          py=/Library/Frameworks/Python.framework/Versions/${v%.*}/bin/python${v%.*}
+          "$py" -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_min }}" >> "$GITHUB_ENV"
+
+      - name: Versione
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.1.0"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install ${{ matrix.torch }}
+          pip install .
+          pip install --no-deps "demucs>=4.1.0,<5"
+          pip install pyinstaller certifi
+          python -c "import torch, numpy; print('torch', torch.__version__, 'numpy', numpy.__version__)"
+
+      - name: PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/stem_splitter.spec
+
+      # ---------- macOS ----------
+      - name: Self-test (app)
+        if: matrix.kind == 'mac'
+        run: '"dist/Stem Splitter.app/Contents/MacOS/StemSplitter" --self-test'
+
+      - name: Compatibilità con macOS ${{ matrix.macos_min }}
+        if: matrix.kind == 'mac' && matrix.macos_min
+        run: |
+          python packaging/check_macos_min.py "dist/Stem Splitter.app" --max ${{ matrix.macos_min }}
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "dist/Stem Splitter.app/Contents/Info.plist"
+
+      - name: DMG
+        if: matrix.kind == 'mac'
+        run: |
+          mkdir -p dmg
+          cp -R "dist/Stem Splitter.app" dmg/
+          ln -s /Applications dmg/Applications
+          out="dist/StemSplitter-${{ steps.ver.outputs.version }}-macOS-${{ matrix.arch }}.dmg"
+          hdiutil create -volname "Stem Splitter" -srcfolder dmg -ov -format UDZO "$out"
+          # verifica: monta il DMG ed esegue il self-test dall'app contenuta
+          mnt=$(hdiutil attach -nobrowse -readonly "$out" | tail -1 | cut -f3-)
+          "$mnt/Stem Splitter.app/Contents/MacOS/StemSplitter" --self-test
+          hdiutil detach "$mnt"
+          ls -lh "$out"
+
+      # ---------- Windows ----------
+      - name: Self-test (exe)
+        if: matrix.kind == 'windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\StemSplitter\StemSplitter.exe" -ArgumentList "--self-test" -Wait -PassThru
+          Get-Content "$HOME\.stem-splitter\stem-splitter.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "self-test fallito ($($p.ExitCode))" }
+
+      - name: Installer (Inno Setup)
+        if: matrix.kind == 'windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc /DAppVersion=${{ steps.ver.outputs.version }} packaging\windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC fallito" }
+          $setup = Get-ChildItem dist\*-Setup.exe | Select-Object -First 1
+          # verifica: installazione silenziosa e self-test dell'app installata
+          Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER" -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\Stem Splitter\StemSplitter.exe"
+          Remove-Item "$HOME\.stem-splitter\stem-splitter.log" -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -Wait -PassThru
+          Get-Content "$HOME\.stem-splitter\stem-splitter.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "self-test dell'app installata fallito" }
+          Get-Item $setup.FullName | Format-List Name, Length
+
+      # ---------- Linux ----------
+      - name: AppImage
+        if: matrix.kind == 'linux'
+        run: |
+          dist/StemSplitter/StemSplitter --self-test
+          app=AppDir
+          mkdir -p $app/usr/lib
+          cp -R dist/StemSplitter $app/usr/lib/
+          cp packaging/linux/AppRun $app/AppRun && chmod +x $app/AppRun
+          cp packaging/linux/stem-splitter.desktop $app/
+          cp packaging/icon.png $app/stem-splitter.png
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          out="dist/StemSplitter-${{ steps.ver.outputs.version }}-Linux-x86_64.AppImage"
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool $app "$out"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$out" --self-test
+          ls -lh "$out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StemSplitter-${{ matrix.kind }}-${{ matrix.arch || 'x64' }}
+          path: |
+            dist/*.dmg
+            dist/*-Setup.exe
+            dist/*.AppImage
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Pubblica la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -lh out
+          # la Release può essere già stata creata dal sito di GitHub (che crea anche il tag):
+          # in quel caso si aggiungono solo gli installer
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" \
+              --title "Stem Splitter $GITHUB_REF_NAME" --generate-notes
+          fi

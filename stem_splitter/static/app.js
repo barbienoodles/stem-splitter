@@ -23,6 +23,7 @@ const COLORS = ["#7c5cff", "#19d3c5", "#ff8a3d", "#e3b341", "#ff5c7a", "#4ea8ff"
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const state = { stem: "vocals_drums", info: null };
+let monkey = null;
 const RATE_LABEL = (r) => `${(r / 1000).toLocaleString("it-IT")} kHz`;
 const BITS_LABEL = { "16": "16 bit", "24": "24 bit", "32f": "32 bit float" };
 let audioCtx = null;
@@ -33,8 +34,11 @@ const fmtTime = (s) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-async function api(path, opts) {
-  const res = await fetch(path, opts);
+// header richiesto dal server per le richieste che modificano qualcosa (protezione CSRF)
+const APP_HEADERS = { "X-Stem-Splitter": "1" };
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...APP_HEADERS, ...(opts.headers || {}) } });
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).detail || msg; } catch {}
@@ -77,11 +81,42 @@ async function init() {
   updateOptions();
   $("#file").accept = ["audio/*", "video/*", ...info.input_extensions].join(",");
 
+  monkey = new Monkey($("#monkey"));
+  const soundBtn = $("#sound");
+  const showSound = () => { soundBtn.textContent = monkey.sound ? "🔊" : "🔇"; soundBtn.setAttribute("aria-pressed", monkey.sound); };
+  soundBtn.onclick = () => { monkey.setSound(!monkey.sound); showSound(); };
+  showSound();
+  if (info.can_shutdown) {
+    $("#quit").hidden = false;
+    $("#quit").onclick = async () => {
+      try { await api("/api/shutdown", { method: "POST" }); } catch {}
+      document.body.innerHTML = '<main class="closed"><h1>Stem Splitter è chiuso 👋</h1><p class="muted">Puoi chiudere questa scheda. Per riaprirlo, avvia di nuovo l\'app.</p></main>';
+    };
+  }
+
+  // il file si può lasciare cadere ovunque nella pagina: la scimmietta si emoziona
   const drop = $("#drop"), input = $("#file");
   input.addEventListener("change", () => { [...input.files].forEach(upload); input.value = ""; });
-  ["dragenter", "dragover"].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));
-  ["dragleave", "drop"].forEach((e) => drop.addEventListener(e, () => drop.classList.remove("over")));
-  drop.addEventListener("drop", (ev) => { ev.preventDefault(); [...ev.dataTransfer.files].forEach(upload); });
+  let depth = 0;
+  const hasFiles = (ev) => [...(ev.dataTransfer?.types || [])].includes("Files");
+  document.addEventListener("dragenter", (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    if (depth++ === 0) { drop.classList.add("over"); monkey.excited(true); }
+  });
+  document.addEventListener("dragover", (ev) => { if (hasFiles(ev)) ev.preventDefault(); });
+  document.addEventListener("dragleave", (ev) => {
+    if (!hasFiles(ev)) return;
+    if (--depth <= 0) { depth = 0; drop.classList.remove("over"); monkey.excited(false); }
+  });
+  document.addEventListener("drop", (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    depth = 0;
+    drop.classList.remove("over");
+    monkey.excited(false);
+    [...ev.dataTransfer.files].forEach(upload);
+  });
 }
 
 function selectStem(key) {
@@ -121,6 +156,8 @@ async function upload(file) {
   $("#jobs").prepend(el);
   $(".job-title", el).textContent = file.name;
   $(".status", el).textContent = "Caricamento…";
+  el._monkey = "active"; // ogni lavoro chiude il suo conto con la scimmietta una volta sola
+  monkey.jobAdded();
   const maxMb = state.info.max_upload_mb;
   if (file.size > maxMb * 1024 * 1024) return fail(el, `File troppo grande (max ${maxMb} MB)`);
 
@@ -140,9 +177,10 @@ async function upload(file) {
       `${job.format.toUpperCase()} ${RATE_LABEL(job.samplerate)} ${bitsLabel}`,
       job.midside !== "off" ? "Mid/Side" : null].filter(Boolean).join(" · ");
     $(".remove", el).onclick = async () => {
+      if (el._monkey === "active") { el._monkey = "closed"; monkey.cancel(); }
       el._mixer?.destroy();
       el.remove();
-      try { await fetch(`/api/jobs/${job.id}`, { method: "DELETE" }); } catch {}
+      try { await fetch(`/api/jobs/${job.id}`, { method: "DELETE", headers: APP_HEADERS }); } catch {}
     };
     poll(job.id, el);
   } catch (e) {
@@ -151,6 +189,7 @@ async function upload(file) {
 }
 
 function fail(el, msg) {
+  if (el._monkey === "active") { el._monkey = "closed"; monkey.fail(msg); }
   el.classList.add("error");
   $(".status", el).textContent = `Errore: ${msg}`;
   $(".remove", el).onclick = () => el.remove();
@@ -164,12 +203,18 @@ async function poll(id, el) {
   $(".status", el).textContent = job.status === "queued" ? "In coda…" :
     `${job.message} ${job.status === "running" ? Math.round(job.progress * 100) + "%" : ""}`;
   if (job.status === "error") return fail(el, job.error);
+  if (job.status === "running") monkey.progress(job.progress, job.message);
   if (job.status !== "done") return setTimeout(() => poll(id, el), 800);
-  el.classList.add("done");
+  // i file compaiono solo dopo la... scorreggia della scimmietta
+  $(".status", el).textContent = "La scimmietta sta finendo…";
+  if (el._monkey === "active") { el._monkey = "closed"; await monkey.finish(); }
+  if (!el.isConnected) return;
+  el.classList.add("done", "reveal");
   $(".status", el).textContent = `Completato in ${job.elapsed}s`;
   $(".zip", el).href = `/api/jobs/${id}/zip`;
   $(".player", el).hidden = false;
   el._mixer = new Mixer(el, job);
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 class Mixer {

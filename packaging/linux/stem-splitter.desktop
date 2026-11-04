@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Stem Splitter
+Comment=Separa voce, batteria e strumenti da qualsiasi brano
+Exec=StemSplitter
+Icon=stem-splitter
+Categories=AudioVideo;Audio;
+Terminal=false
