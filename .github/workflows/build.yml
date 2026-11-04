@@ -124,9 +124,12 @@ jobs:
           out="dist/StemSplitter-${{ steps.ver.outputs.version }}-macOS-${{ matrix.arch }}.dmg"
           hdiutil create -volname "Stem Splitter" -srcfolder dmg -ov -format UDZO "$out"
           # verifica: monta il DMG ed esegue il self-test dall'app contenuta
-          mnt=$(hdiutil attach -nobrowse -readonly "$out" | tail -1 | cut -f3-)
+          # punto di montaggio fisso: l'output di hdiutil non ha sempre lo stesso formato
+          mnt="$RUNNER_TEMP/dmg-mount"
+          mkdir -p "$mnt"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$out"
           "$mnt/Stem Splitter.app/Contents/MacOS/StemSplitter" --self-test
-          hdiutil detach "$mnt"
+          hdiutil detach "$mnt" || hdiutil detach -force "$mnt"
           ls -lh "$out"
 
       # ---------- Windows ----------
