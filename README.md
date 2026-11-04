@@ -37,7 +37,11 @@ L'app apre la pagina nel browser; se è già aperta, la riapre soltanto. Si chiu
 **Chiudi l'app** in alto a destra. I file elaborati e il log stanno in `~/.stem-splitter`.
 
 Gli installer vengono creati da GitHub Actions (`.github/workflows/build.yml`) a ogni push e
-pubblicati automaticamente in una Release quando si crea un tag `v*` (es. `git tag v0.2.0 && git push --tags`).
+pubblicati automaticamente in una Release quando si crea un tag `v*`:
+
+- dal sito: *Releases → Draft a new release → Choose a tag*, scrivi ad esempio `v0.2.0` (*Create new tag*),
+  target `main`, poi **Publish release**. Dopo circa 30–40 minuti gli installer compaiono nella Release;
+- oppure da terminale: `git tag v0.2.0 && git push origin v0.2.0`.
 
 ## Installazione dal codice (Mac e Linux)
 

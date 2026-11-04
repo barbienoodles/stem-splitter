@@ -196,5 +196,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -lh out
-          gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" \
-            --title "Stem Splitter $GITHUB_REF_NAME" --generate-notes
+          # la Release può essere già stata creata dal sito di GitHub (che crea anche il tag):
+          # in quel caso si aggiungono solo gli installer
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" \
+              --title "Stem Splitter $GITHUB_REF_NAME" --generate-notes
+          fi
