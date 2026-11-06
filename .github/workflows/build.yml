@@ -89,7 +89,7 @@ jobs:
       - name: Versione
         id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.1.0"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.2.0"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Dipendenze
@@ -107,28 +107,28 @@ jobs:
       # ---------- macOS ----------
       - name: Self-test (app)
         if: matrix.kind == 'mac'
-        run: '"dist/Stem Splitter.app/Contents/MacOS/StemSplitter" --self-test'
+        run: '"dist/Banana Split.app/Contents/MacOS/BananaSplit" --self-test'
 
       - name: Compatibilità con macOS ${{ matrix.macos_min }}
         if: matrix.kind == 'mac' && matrix.macos_min
         run: |
-          python packaging/check_macos_min.py "dist/Stem Splitter.app" --max ${{ matrix.macos_min }}
-          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "dist/Stem Splitter.app/Contents/Info.plist"
+          python packaging/check_macos_min.py "dist/Banana Split.app" --max ${{ matrix.macos_min }}
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "dist/Banana Split.app/Contents/Info.plist"
 
       - name: DMG
         if: matrix.kind == 'mac'
         run: |
           mkdir -p dmg
-          cp -R "dist/Stem Splitter.app" dmg/
+          cp -R "dist/Banana Split.app" dmg/
           ln -s /Applications dmg/Applications
-          out="dist/StemSplitter-${{ steps.ver.outputs.version }}-macOS-${{ matrix.arch }}.dmg"
-          hdiutil create -volname "Stem Splitter" -srcfolder dmg -ov -format UDZO "$out"
+          out="dist/BananaSplit-${{ steps.ver.outputs.version }}-macOS-${{ matrix.arch }}.dmg"
+          hdiutil create -volname "Banana Split" -srcfolder dmg -ov -format UDZO "$out"
           # verifica: monta il DMG ed esegue il self-test dall'app contenuta
           # punto di montaggio fisso: l'output di hdiutil non ha sempre lo stesso formato
           mnt="$RUNNER_TEMP/dmg-mount"
           mkdir -p "$mnt"
           hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$out"
-          "$mnt/Stem Splitter.app/Contents/MacOS/StemSplitter" --self-test
+          "$mnt/Banana Split.app/Contents/MacOS/BananaSplit" --self-test
           hdiutil detach "$mnt" || hdiutil detach -force "$mnt"
           ls -lh "$out"
 
@@ -137,8 +137,8 @@ jobs:
         if: matrix.kind == 'windows'
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "dist\StemSplitter\StemSplitter.exe" -ArgumentList "--self-test" -Wait -PassThru
-          Get-Content "$HOME\.stem-splitter\stem-splitter.log" -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath "dist\BananaSplit\BananaSplit.exe" -ArgumentList "--self-test" -Wait -PassThru
+          Get-Content "$HOME\.banana-split\banana-split.log" -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "self-test fallito ($($p.ExitCode))" }
 
       - name: Installer (Inno Setup)
@@ -152,10 +152,10 @@ jobs:
           $setup = Get-ChildItem dist\*-Setup.exe | Select-Object -First 1
           # verifica: installazione silenziosa e self-test dell'app installata
           Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER" -Wait
-          $exe = "$env:LOCALAPPDATA\Programs\Stem Splitter\StemSplitter.exe"
-          Remove-Item "$HOME\.stem-splitter\stem-splitter.log" -ErrorAction SilentlyContinue
+          $exe = "$env:LOCALAPPDATA\Programs\Banana Split\BananaSplit.exe"
+          Remove-Item "$HOME\.banana-split\banana-split.log" -ErrorAction SilentlyContinue
           $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -Wait -PassThru
-          Get-Content "$HOME\.stem-splitter\stem-splitter.log" -ErrorAction SilentlyContinue
+          Get-Content "$HOME\.banana-split\banana-split.log" -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "self-test dell'app installata fallito" }
           Get-Item $setup.FullName | Format-List Name, Length
 
@@ -163,25 +163,25 @@ jobs:
       - name: AppImage
         if: matrix.kind == 'linux'
         run: |
-          dist/StemSplitter/StemSplitter --self-test
+          dist/BananaSplit/BananaSplit --self-test
           app=AppDir
           mkdir -p $app/usr/lib
-          cp -R dist/StemSplitter $app/usr/lib/
+          cp -R dist/BananaSplit $app/usr/lib/
           cp packaging/linux/AppRun $app/AppRun && chmod +x $app/AppRun
-          cp packaging/linux/stem-splitter.desktop $app/
-          cp packaging/icon.png $app/stem-splitter.png
+          cp packaging/linux/banana-split.desktop $app/
+          cp packaging/icon.png $app/banana-split.png
           # versione fissa con impronta verificata: finisce dentro l'AppImage pubblicata
           curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
           echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool" | sha256sum -c -
           chmod +x appimagetool
-          out="dist/StemSplitter-${{ steps.ver.outputs.version }}-Linux-x86_64.AppImage"
+          out="dist/BananaSplit-${{ steps.ver.outputs.version }}-Linux-x86_64.AppImage"
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool $app "$out"
           APPIMAGE_EXTRACT_AND_RUN=1 "$out" --self-test
           ls -lh "$out"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: StemSplitter-${{ matrix.kind }}-${{ matrix.arch || 'x64' }}
+          name: BananaSplit-${{ matrix.kind }}-${{ matrix.arch || 'x64' }}
           path: |
             dist/*.dmg
             dist/*-Setup.exe
@@ -212,5 +212,5 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" \
-              --title "Stem Splitter $GITHUB_REF_NAME" --generate-notes
+              --title "Banana Split $GITHUB_REF_NAME" --generate-notes
           fi

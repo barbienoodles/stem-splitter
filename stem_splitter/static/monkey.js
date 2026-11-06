@@ -3,6 +3,7 @@
 // e quando ha finito... fa una scorreggia. Tutto in SVG + Web Animations, suoni con Web Audio.
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const IDLE_TEXT = "Trascina qui il brano o clicca su di me! 🍌";
 const REDUCED = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 const MONKEY_SVG = `
@@ -55,9 +56,9 @@ const MONKEY_SVG = `
   </g>
   <g class="mk-pile">
     <g transform="translate(228 294) rotate(-18)"><use href="#mk-peanut"/></g>
-    <g transform="translate(262 288) rotate(10)"><use href="#mk-stone"/></g>
+    <g transform="translate(262 286) rotate(-8)"><use href="#mk-banana"/></g>
     <g transform="translate(300 285) rotate(25)"><use href="#mk-peanut"/></g>
-    <g transform="translate(338 289) rotate(-6)"><use href="#mk-stone"/></g>
+    <g transform="translate(340 287) rotate(12) scale(-1 1)"><use href="#mk-banana"/></g>
     <g transform="translate(372 294) rotate(14)"><use href="#mk-peanut"/></g>
   </g>
   <defs>
@@ -65,9 +66,11 @@ const MONKEY_SVG = `
       <path d="M-16 0c0-9 7-12 12-9 3 2 5 2 8 0 5-3 12 0 12 9s-7 12-12 9c-3-2-5-2-8 0-5 3-12 0-12-9z" fill="#d9a066" stroke="#a8743f" stroke-width="2"/>
       <path d="M-9 -3v6M-2 -4v8M5 -3v6" stroke="#b9834d" stroke-width="1.6" stroke-linecap="round"/>
     </g>
-    <g id="mk-stone">
-      <path d="M-15 4c-3-8 3-15 11-15 9-1 18 3 19 11 1 7-5 12-14 12-8 0-14-2-16-8z" fill="#8d96a8" stroke="#5f6878" stroke-width="2"/>
-      <path d="M-6 -4c4-2 8-2 11 0" stroke="#b8c0cf" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <g id="mk-banana">
+      <path d="M-22 -6C-16 9 10 12 22 -4L25 -9C20 -7 17 -4 15 -1 6 6-10 5-18 -8Z" fill="#ffd23f" stroke="#b88a00" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M-14 -2C-6 5 7 5 14 -2" stroke="#e6b800" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <path d="M22 -4L26 -10" stroke="#6b4a1a" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="-21" cy="-7" r="2.4" fill="#4a3412"/>
     </g>
   </defs>
   <g class="mk-bowl">
@@ -106,14 +109,14 @@ class Monkey {
   idle() {
     this.hideDone();
     this.face("open", "smile");
-    this.say("Trascina qui una canzone: ci penso io!");
+    this.say(IDLE_TEXT);
     this.bob(true);
   }
 
   excited(on) {
     if (this.working) return;
     this.face(on ? "open" : "open", on ? "open" : "smile");
-    this.say(on ? "Dai, dammelo! 🍌" : "Trascina qui una canzone: ci penso io!");
+    this.say(on ? "Dai, dammelo! 🍌" : IDLE_TEXT);
     for (const [arm, deg] of [["left", 150], ["right", -150]]) {
       this.q(`.mk-arm-${arm}`).animate([{ transform: `rotate(${on ? deg : 0}deg)` }],
         { duration: 300, fill: "forwards", easing: "ease-out" });
@@ -162,17 +165,18 @@ class Monkey {
     try {
       while (this.active > 0 || this.pendingFarts.length) {
         if (this.pendingFarts.length) {
-          // a lavoro finito: l'ultima nocciolina, poi... la scorreggia
-          this.say("L'ultima nocciolina… 🥜");
+          // a lavoro finito: l'ultima banana, poi... la scorreggia
+          this.say("L'ultima banana… 🍌");
           this.finishing = true;
-          await this.eatPeanut();
+          await this.eatBanana();
           this.finishing = false;
           await this.fart();
           this.pendingFarts.shift()();
           continue;
         }
-        if (Math.random() < 0.6) await this.eatPeanut();
-        else await this.throwStone();
+        // Banana Split: le banane le mangia, le noccioline le lancia via
+        if (Math.random() < 0.55) await this.eatBanana();
+        else await this.throwPeanut();
       }
     } finally {
       this.working = false;
@@ -191,6 +195,10 @@ class Monkey {
     g.setAttribute("transform", `translate(${hand.getAttribute("cx")} ${+hand.getAttribute("cy") + 6})`);
     const use = document.createElementNS(SVG_NS, "use");
     use.setAttribute("href", `#mk-${kind}`);
+    // trasformazioni CSS attorno al centro dell'oggetto (serve per i morsi alla banana)
+    use.style.transformBox = "fill-box";
+    use.style.transformOrigin = "center";
+    if (kind === "banana") use.setAttribute("transform", "scale(1.5)");
     g.appendChild(use);
     hand.parentNode.insertBefore(g, hand); // la mano lo "tiene" davanti
     return g;
@@ -201,30 +209,34 @@ class Monkey {
       { duration: REDUCED ? 1 : duration, fill: "forwards", easing }).finished;
   }
 
-  async eatPeanut() {
+  async eatBanana() {
     await this.rotate("left", -14, 260); // pesca nella ciotola
-    const nut = this.item("peanut", "left");
+    const banana = this.item("banana", "left");
     this.face("open", "open");
     await this.rotate("left", -128, 420, "cubic-bezier(.3,.7,.4,1)"); // alla bocca
-    nut.remove();
-    await this.chew();
+    // tre morsi: la banana si accorcia mentre mastica
+    const bites = banana.firstChild.animate(
+      [{ transform: "scale(1.5)" }, { transform: "scale(1.1, 1.3)" }, { transform: "scale(.7, 1.1)" }, { transform: "scale(.25, .8)" }],
+      { duration: REDUCED ? 1 : 3 * 170, easing: "steps(3, end)", fill: "forwards" });
+    await Promise.all([this.chew(), bites.finished]);
+    banana.remove();
     await this.rotate("left", 0, 260);
   }
 
-  async throwStone() {
+  async throwPeanut() {
     await this.rotate("right", 14, 260);
-    const stone = this.item("stone", "right");
-    this.face("open", "sad"); // bleah, un sasso
+    const peanut = this.item("peanut", "right");
+    this.face("open", "sad"); // bleah, una nocciolina
     await this.rotate("right", 40, 160);
     const swing = this.rotate("right", -135, 260, "cubic-bezier(.5,0,.9,.5)");
     await this.wait(REDUCED ? 0 : 190);
-    this.fling(stone);
+    this.fling(peanut);
     await swing;
     this.face("open", "smile");
     await this.rotate("right", 0, 300);
   }
 
-  // stacca il sasso dalla mano e lo fa volare via con un arco
+  // stacca la nocciolina dalla mano e la fa volare via con un arco
   fling(el) {
     // posizione della mano nelle coordinate del livello dei voli (unità del viewBox)
     const layer = this.q(".mk-flying");
@@ -383,7 +395,10 @@ class Monkey {
   }
 
   say(text) {
-    if (this.bubble) this.bubble.textContent = text;
+    if (!this.bubble) return;
+    this.bubble.textContent = text;
+    // l'insegna al neon lampeggia solo quando la scimmietta chiama il brano
+    this.bubble.classList.toggle("flicker", text === IDLE_TEXT);
   }
 
   wait(ms) {

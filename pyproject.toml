@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stem-splitter"
-version = "0.1.0"
+name = "banana-split"
+version = "0.2.0"
 description = "Separazione di brani in stem (voce, batteria, basso, chitarra, piano, altro) in locale, su Intel e Apple Silicon."
 readme = "README.md"
 # Intel Mac: PyTorch non pubblica più wheel per macOS x86_64 dopo la 2.2.x,
@@ -33,7 +33,8 @@ dependencies = [
 dev = ["pytest", "httpx"]
 
 [project.scripts]
-stem-splitter = "stem_splitter.cli:main"
+banana-split = "stem_splitter.cli:main"
+stem-splitter = "stem_splitter.cli:main"  # nome precedente, per compatibilità
 
 [tool.setuptools]
 packages = ["stem_splitter"]

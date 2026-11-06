@@ -1,4 +1,4 @@
 #!/bin/sh
 # Avvio dell'AppImage: esegue il programma creato da PyInstaller.
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/lib/StemSplitter/StemSplitter" "$@"
+exec "$HERE/usr/lib/BananaSplit/BananaSplit" "$@"

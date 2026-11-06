@@ -27,8 +27,22 @@
   <!-- ciotola -->
   <path d="M250 760h524c-20 110-130 160-262 160S270 870 250 760z" fill="#e3b341"/>
   <rect x="236" y="736" width="552" height="44" rx="22" fill="#f5cf6a"/>
-  <!-- noccioline -->
-  <ellipse cx="420" cy="730" rx="34" ry="22" fill="#d9a066" transform="rotate(-20 420 730)"/>
-  <ellipse cx="512" cy="722" rx="34" ry="22" fill="#c98f55" transform="rotate(15 512 722)"/>
-  <ellipse cx="600" cy="732" rx="34" ry="22" fill="#d9a066" transform="rotate(-8 600 732)"/>
+  <!-- banane e noccioline nella ciotola -->
+  <g transform="translate(420 712) rotate(8) scale(-1 1)">
+    <path d="M-110 -20Q0 110 110 -20Q0 40 -110 -20Z" fill="#ffd23f" stroke="#b88a00" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M-70 8Q0 52 70 8" stroke="#e6b800" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <path d="M108 -22L126 -46" stroke="#6b4a1a" stroke-width="16" stroke-linecap="round"/>
+    <circle cx="-108" cy="-20" r="7" fill="#4a3412"/>
+  </g>
+  <g transform="translate(610 708) rotate(-10)">
+    <path d="M-110 -20Q0 110 110 -20Q0 40 -110 -20Z" fill="#ffe36b" stroke="#b88a00" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M-70 8Q0 52 70 8" stroke="#e6b800" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <path d="M108 -22L126 -46" stroke="#6b4a1a" stroke-width="16" stroke-linecap="round"/>
+    <circle cx="-108" cy="-20" r="7" fill="#4a3412"/>
+  </g>
+  <ellipse cx="300" cy="736" rx="32" ry="21" fill="#c98f55" stroke="#a8743f" stroke-width="5" transform="rotate(-20 300 736)"/>
+  <ellipse cx="520" cy="742" rx="32" ry="21" fill="#d9a066" stroke="#a8743f" stroke-width="5" transform="rotate(12 520 742)"/>
+  <ellipse cx="730" cy="736" rx="30" ry="20" fill="#d9a066" stroke="#a8743f" stroke-width="5" transform="rotate(18 730 736)"/>
+  <!-- bordo anteriore della ciotola, davanti alla frutta -->
+  <rect x="236" y="752" width="552" height="30" rx="15" fill="#f5cf6a"/>
 </svg>

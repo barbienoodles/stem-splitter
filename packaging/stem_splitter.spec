@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller: `pyinstaller packaging/stem_splitter.spec` dalla radice del repository.
-# Produce dist/Stem Splitter.app (macOS) oppure dist/StemSplitter/ (Windows, Linux).
+# Produce dist/Banana Split.app (macOS) oppure dist/BananaSplit/ (Windows, Linux).
 import platform
 import sys
 from pathlib import Path
@@ -10,8 +10,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = Path(SPECPATH).parent
 PKG = ROOT / "packaging"
-NAME = "StemSplitter"
-VERSION = "0.1.0"
+NAME = "BananaSplit"
+VERSION = "0.2.0"
 
 # ffmpeg incluso in imageio-ffmpeg: va tra i "binaries" per mantenere il permesso di esecuzione
 ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe())
@@ -47,7 +47,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name=NAME,
-    console=False,  # niente finestra di terminale: i log vanno in ~/.stem-splitter
+    console=False,  # niente finestra di terminale: i log vanno in ~/.banana-split
     icon=str(PKG / ("icon.icns" if sys.platform == "darwin" else "icon.ico")),
     upx=False,
 )
@@ -57,12 +57,12 @@ coll = COLLECT(exe, a.binaries, a.datas, name=NAME, upx=False)
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="Stem Splitter.app",
+        name="Banana Split.app",
         icon=str(PKG / "icon.icns"),
-        bundle_identifier="com.barbienoodles.stemsplitter",
+        bundle_identifier="com.barbienoodles.bananasplit",
         version=VERSION,
         info_plist={
-            "CFBundleDisplayName": "Stem Splitter",
+            "CFBundleDisplayName": "Banana Split",
             "CFBundleShortVersionString": VERSION,
             # Intel: Python 3.12 di python.org e PyTorch 2.2 funzionano da macOS 10.13 High Sierra
             # (la CI lo verifica con packaging/check_macos_min.py); Apple Silicon parte da macOS 11
