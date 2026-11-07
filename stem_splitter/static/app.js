@@ -22,7 +22,7 @@ const CHIP_TEXT = {
 const COLORS = ["#7c5cff", "#19d3c5", "#ff8a3d", "#e3b341", "#ff5c7a", "#4ea8ff"];
 
 const $ = (sel, root = document) => root.querySelector(sel);
-const state = { stem: "vocals_drums", info: null };
+const state = { stem: "vocals_drums", info: null, saveToFolder: true };
 let monkey = null;
 const RATE_LABEL = (r) => `${(r / 1000).toLocaleString("it-IT")} kHz`;
 const BITS_LABEL = { "16": "16 bit", "24": "24 bit", "32f": "32 bit float" };
@@ -50,6 +50,7 @@ async function api(path, opts = {}) {
 async function init() {
   const info = await api("/api/info");
   state.info = info;
+  if (info.name) { $("#app-name").textContent = info.name; document.title = info.name; }
   $("#device").textContent = `⚡ ${info.device_label}`;
   $("#device").title = info.platform;
 
@@ -82,6 +83,7 @@ async function init() {
   $("#file").accept = ["audio/*", "video/*", ...info.input_extensions].join(",");
 
   monkey = new Monkey($("#monkey"));
+  initDestination().catch((e) => { $("#dest-msg").textContent = `Cartella non disponibile: ${e.message}`; });
   const soundBtn = $("#sound");
   const showSound = () => { soundBtn.textContent = monkey.sound ? "🔊" : "🔇"; soundBtn.setAttribute("aria-pressed", monkey.sound); };
   soundBtn.onclick = () => { monkey.setSound(!monkey.sound); showSound(); };
@@ -169,6 +171,7 @@ async function upload(file) {
   fd.append("samplerate", $("#samplerate").value);
   fd.append("bit_depth", $("#bitdepth").value);
   fd.append("midside", $("#midside").value);
+  fd.append("save_to_folder", state.saveToFolder ? "true" : "false");
   try {
     const job = await api("/api/jobs", { method: "POST", body: fd });
     const qLabel = state.info.qualities[job.quality] || job.quality;
@@ -210,6 +213,7 @@ async function poll(id, el) {
   if (el._monkey === "active") { el._monkey = "closed"; await monkey.finish(); }
   if (!el.isConnected) return;
   el.classList.add("done", "reveal");
+  showSaved(el, job);
   $(".status", el).textContent = `Completato in ${job.elapsed}s`;
   $(".zip", el).href = `/api/jobs/${id}/zip`;
   $(".player", el).hidden = false;
@@ -459,5 +463,78 @@ document.addEventListener("keydown", (e) => {
   const m = [...mixers].find((x) => x.playing) || [...mixers][0];
   if (m && !m.playBtn.disabled) { e.preventDefault(); m.playing ? m.pause() : m.play(); }
 });
+
+// ---------- cartella di destinazione ----------
+
+function renderDestination(settings) {
+  state.saveToFolder = settings.save_to_folder;
+  $("#save-to-folder").checked = settings.save_to_folder;
+  $(".dest").classList.toggle("off", !settings.save_to_folder);
+  $("#dest-path").textContent = settings.output_dir;
+  $("#dest-path").title = settings.output_dir;
+  $("#dest-input").value = settings.output_dir;
+  // senza finestra di sistema (es. Linux senza zenity) si scrive il percorso a mano
+  $("#pick-folder").hidden = !settings.can_pick_folder;
+  $("#dest-manual").hidden = settings.can_pick_folder;
+}
+
+async function saveSettings(changes) {
+  const settings = await api("/api/settings", {
+    method: "POST", body: JSON.stringify(changes), headers: { "Content-Type": "application/json" },
+  });
+  renderDestination(settings);
+  return settings;
+}
+
+async function initDestination() {
+  renderDestination(await api("/api/settings"));
+  const msg = $("#dest-msg"), defaultMsg = msg.textContent;
+  $("#save-to-folder").addEventListener("change", (e) => {
+    saveSettings({ save_to_folder: e.target.checked }).catch((err) => { msg.textContent = err.message; });
+  });
+  $("#pick-folder").addEventListener("click", async () => {
+    const btn = $("#pick-folder");
+    btn.disabled = true;
+    msg.textContent = "Si è aperta una finestra per scegliere la cartella (se non la vedi, è dietro al browser).";
+    try {
+      const res = await api("/api/pick-folder", { method: "POST" });
+      renderDestination(res);
+      msg.textContent = res.cancelled ? defaultMsg : "Fatto! Gli stem andranno qui.";
+    } catch (err) {
+      msg.textContent = err.message;
+      $("#dest-manual").hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $("#dest-manual").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await saveSettings({ output_dir: $("#dest-input").value });
+      msg.textContent = "Fatto! Gli stem andranno qui.";
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  });
+}
+
+function showSaved(el, job) {
+  const box = $(".saved", el);
+  if (!job.export_dir && !job.export_error) return;
+  box.hidden = false;
+  const path = $(".saved-path", box);
+  if (job.export_dir) {
+    path.textContent = "";
+    const label = document.createElement("b");
+    label.textContent = "Salvati in ";
+    path.append(label, document.createTextNode(job.export_dir));
+    $(".reveal", box).onclick = () => api(`/api/jobs/${job.id}/reveal`, { method: "POST" })
+      .catch((err) => { path.textContent = err.message; });
+  } else {
+    box.classList.add("warn");
+    path.textContent = `Non sono riuscito a salvarli nella cartella: ${job.export_error}. Scaricali da qui sotto.`;
+    $(".reveal", box).hidden = true;
+  }
+}
 
 init().catch((e) => { $("#device").textContent = `Errore: ${e.message}`; });

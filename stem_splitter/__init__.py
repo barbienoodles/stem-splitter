@@ -1,4 +1,4 @@
-"""Stem Splitter: separazione locale di brani in stem con Demucs."""
+"""Banana Split: separazione locale di brani in stem con Demucs."""
 
 import os
 
@@ -7,4 +7,4 @@ import os
 # Deve essere impostata prima del primo import di torch.
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

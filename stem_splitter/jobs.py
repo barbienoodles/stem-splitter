@@ -13,6 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import outputs as out
 from .separator import Separator
 
 DEFAULT_TTL_HOURS = float(os.environ.get("STEM_SPLITTER_TTL_HOURS", "24"))
@@ -46,6 +47,9 @@ class Job:
     created: float = field(default_factory=time.time)
     elapsed: float | None = None
     cancelled: bool = False
+    dest_dir: Path | None = None  # dove copiare gli stem a fine lavoro (None = solo download)
+    export_dir: Path | None = None
+    export_error: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -62,6 +66,8 @@ class Job:
             "message": self.message,
             "error": self.error,
             "elapsed": self.elapsed,
+            "export_dir": str(self.export_dir) if self.export_dir else None,
+            "export_error": self.export_error,
             "stems": [
                 {"name": name, "url": f"/api/jobs/{self.id}/stems/{name}"}
                 for name in self.outputs
@@ -83,14 +89,15 @@ class JobManager:
         self._worker.start()
 
     def submit(self, filename: str, data_path: Path, stem: str, quality: str, fmt: str,
-               samplerate: int = 44100, bit_depth: str = "24", midside: str = "off") -> Job:
+               samplerate: int = 44100, bit_depth: str = "24", midside: str = "off",
+               dest_dir: Path | None = None) -> Job:
         job_id = uuid.uuid4().hex[:12]
         job_dir = self.workdir / job_id
         job_dir.mkdir(parents=True)
         input_path = job_dir / f"input{Path(filename).suffix.lower() or '.audio'}"
         shutil.move(str(data_path), input_path)
         job = Job(job_id, filename, input_path, job_dir / "stems", stem, quality, fmt,
-                  samplerate, bit_depth, midside)
+                  samplerate, bit_depth, midside, dest_dir=dest_dir)
         with self._jobs_lock:
             self.jobs[job_id] = job
         self._queue.put(job_id)
@@ -157,6 +164,13 @@ class JobManager:
                     quality=job.quality, fmt=job.fmt, samplerate=job.samplerate,
                     bit_depth=job.bit_depth, midside=job.midside, progress=report,
                 )
+                if job.dest_dir is not None:
+                    report(0.995, "Copio gli stem nella cartella scelta…")
+                    try:
+                        job.export_dir = out.export_stems(job.outputs, job.dest_dir, job.filename)
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        # gli stem restano scaricabili dalla pagina anche se la copia fallisce
+                        job.export_error = str(exc)
                 job.status, job.progress, job.message = "done", 1.0, "Completato"
             except JobCancelled:
                 job.status, job.message = "cancelled", "Annullato"

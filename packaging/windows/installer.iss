@@ -1,24 +1,24 @@
-; Inno Setup: crea StemSplitter-Setup.exe da dist\StemSplitter (PyInstaller).
-; Compilare dalla radice del repository: iscc /DAppVersion=0.1.0 packaging\windows\installer.iss
+; Inno Setup: crea BananaSplit-Setup.exe da dist\BananaSplit (PyInstaller).
+; Compilare dalla radice del repository: iscc /DAppVersion=0.2.0 packaging\windows\installer.iss
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 
 [Setup]
-AppId={{6E0B9D5C-2A4F-4C7B-9E3D-5A1F3C8B7D21}
-AppName=Stem Splitter
+AppId={{0A0EFE82-0833-4FC7-ABC6-6B6FB6B9F767}
+AppName=Banana Split
 AppVersion={#AppVersion}
 AppPublisher=barbienoodles
-DefaultDirName={localappdata}\Programs\Stem Splitter
-DefaultGroupName=Stem Splitter
+DefaultDirName={localappdata}\Programs\Banana Split
+DefaultGroupName=Banana Split
 ; installazione per l'utente corrente: non servono i permessi di amministratore
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\dist
-OutputBaseFilename=StemSplitter-{#AppVersion}-Windows-Setup
+OutputBaseFilename=BananaSplit-{#AppVersion}-Windows-Setup
 SetupIconFile=..\icon.ico
-UninstallDisplayIcon={app}\StemSplitter.exe
+UninstallDisplayIcon={app}\BananaSplit.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -32,11 +32,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "..\..\dist\StemSplitter\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\dist\BananaSplit\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Stem Splitter"; Filename: "{app}\StemSplitter.exe"
-Name: "{autodesktop}\Stem Splitter"; Filename: "{app}\StemSplitter.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Banana Split"; Filename: "{app}\BananaSplit.exe"
+Name: "{autodesktop}\Banana Split"; Filename: "{app}\BananaSplit.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\StemSplitter.exe"; Description: "{cm:LaunchProgram,Stem Splitter}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\BananaSplit.exe"; Description: "{cm:LaunchProgram,Banana Split}"; Flags: nowait postinstall skipifsilent

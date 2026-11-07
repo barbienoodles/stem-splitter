@@ -458,3 +458,134 @@ def test_download_names_are_sanitized(song, tmp_path):
     assert names and all(not set('\\/:*?"<>|') & set(n) for n in names), names
     cd = c.get(f"/api/jobs/{job_id}/stems/vocals").headers["content-disposition"]
     assert "%5C" not in cd and "\\" not in cd, cd
+
+
+# --- Banana Split: cartella di destinazione ---------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path, monkeypatch):
+    """Nessun test deve toccare la vera cartella dell'utente (impostazioni, Musica)."""
+    home = tmp_path / "home"
+    (home / "Music").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("BANANA_SPLIT_HOME", str(home / ".banana-split"))
+    return home
+
+
+def _app_client(tmp_path, sep=None):
+    from stem_splitter.server import create_app
+
+    return _local_client(create_app(sep or FakeSeparator("cpu"), tmp_path / "jobs"),
+                         headers={"X-Stem-Splitter": "1"})
+
+
+def test_settings_default_and_update(tmp_path, _isolated_home):
+    c = _app_client(tmp_path)
+    s = c.get("/api/settings").json()
+    assert s["output_dir"] == str(_isolated_home / "Music" / "Banana Split")
+    assert s["save_to_folder"] is True
+    dest = tmp_path / "Stem miei"
+    s = c.post("/api/settings", json={"output_dir": str(dest), "save_to_folder": False}).json()
+    assert s["output_dir"] == str(dest) and dest.is_dir() and s["save_to_folder"] is False
+    # ricordata al riavvio (nuovo server)
+    assert _app_client(tmp_path).get("/api/settings").json()["output_dir"] == str(dest)
+
+
+@pytest.mark.parametrize("bad,msg", [("relativa/cartella", "percorso completo"), ("/non/esiste/proprio", "non esiste"), ("", "Indica")])
+def test_settings_reject_bad_paths(tmp_path, bad, msg):
+    r = _app_client(tmp_path).post("/api/settings", json={"output_dir": bad})
+    assert r.status_code == 400 and msg in r.json()["detail"]
+
+
+def test_settings_need_app_header(tmp_path):
+    from stem_splitter.server import create_app
+
+    c = _local_client(create_app(FakeSeparator("cpu"), tmp_path / "jobs"))
+    assert c.post("/api/settings", json={"output_dir": str(tmp_path)}).status_code == 403
+    assert c.post("/api/pick-folder").status_code == 403
+
+
+def test_stems_are_saved_in_chosen_folder(song, tmp_path):
+    c = _app_client(tmp_path)
+    dest = tmp_path / "uscita"
+    c.post("/api/settings", json={"output_dir": str(dest)})
+    ids = []
+    for _ in range(2):
+        with open(song, "rb") as f:
+            ids.append(c.post("/api/jobs", files={"file": ("Grazie, Michelina.mp3", f)},
+                              data={"save_to_folder": "true", "format": "wav"}).json()["id"])
+    jobs = [_wait(c, i).json() for i in ids]
+    folders = [Path(j["export_dir"]) for j in jobs]
+    assert [f.name for f in folders] == ["Grazie, Michelina - Banana Split", "Grazie, Michelina - Banana Split (2)"]
+    assert sorted(p.name for p in folders[0].iterdir()) == [
+        "Grazie, Michelina - drums.wav", "Grazie, Michelina - instrumental.wav", "Grazie, Michelina - vocals.wav"]
+    assert all(f.parent == dest for f in folders)
+
+
+def test_no_folder_copy_when_disabled(song, tmp_path):
+    c = _app_client(tmp_path)
+    c.post("/api/settings", json={"output_dir": str(tmp_path / "uscita")})
+    with open(song, "rb") as f:
+        job = _wait(c, c.post("/api/jobs", files={"file": ("a.mp3", f)}).json()["id"]).json()
+    assert job["status"] == "done" and job["export_dir"] is None
+    assert not any((tmp_path / "uscita").iterdir())
+
+
+def test_export_failure_keeps_job_downloadable(song, tmp_path, monkeypatch):
+    from stem_splitter import outputs
+
+    def boom(*a, **k):
+        raise OSError("disco pieno")
+
+    monkeypatch.setattr(outputs, "export_stems", boom)
+    c = _app_client(tmp_path)
+    with open(song, "rb") as f:
+        job = _wait(c, c.post("/api/jobs", files={"file": ("a.mp3", f)}, data={"save_to_folder": "true"}).json()["id"]).json()
+    assert job["status"] == "done" and "disco pieno" in job["export_error"]
+    assert c.get(job["stems"][0]["url"]).status_code == 200
+
+
+def test_pick_folder_and_reveal(song, tmp_path, monkeypatch):
+    from stem_splitter import outputs
+
+    chosen = tmp_path / "scelta"
+    chosen.mkdir()
+    revealed = []
+    c = _app_client(tmp_path)
+
+    monkeypatch.setattr(outputs, "pick_folder", lambda initial=None: chosen)
+    assert c.post("/api/pick-folder").json()["output_dir"] == str(chosen)
+    monkeypatch.setattr(outputs, "pick_folder", lambda initial=None: None)
+    r = c.post("/api/pick-folder").json()
+    assert r["cancelled"] is True and r["output_dir"] == str(chosen)
+
+    def unavailable(initial=None):
+        raise outputs.PickerUnavailable("niente finestra")
+
+    monkeypatch.setattr(outputs, "pick_folder", unavailable)
+    assert c.post("/api/pick-folder").status_code == 501
+
+    monkeypatch.setattr(outputs, "reveal", lambda p: revealed.append(p))
+    with open(song, "rb") as f:
+        job = _wait(c, c.post("/api/jobs", files={"file": ("b.mp3", f)}, data={"save_to_folder": "true"}).json()["id"]).json()
+    assert c.post(f"/api/jobs/{job['id']}/reveal").status_code == 200
+    assert revealed == [Path(job["export_dir"])] and revealed[0].parent == chosen
+
+
+def test_picker_commands_by_platform(monkeypatch, tmp_path):
+    """Il comando della finestra di sistema passa il percorso come argomento, mai dentro lo script."""
+    from stem_splitter import outputs
+
+    tricky = tmp_path / 'cartella "strana" $(rm -rf)'
+    monkeypatch.setattr(outputs.sys, "platform", "darwin")
+    monkeypatch.setattr(outputs.shutil, "which", lambda n: "/usr/bin/" + n)
+    cmd, _ = outputs._picker_command(tricky)
+    assert cmd[0] == "osascript" and cmd[-1] == str(tricky)
+    assert all(str(tricky) not in part for part in cmd[:-1])
+    monkeypatch.setattr(outputs.sys, "platform", "win32")
+    cmd, extra = outputs._picker_command(tricky)
+    assert extra["env"]["BANANA_INITIAL"] == str(tricky) and all(str(tricky) not in p for p in cmd)
+    monkeypatch.setattr(outputs.sys, "platform", "linux")
+    monkeypatch.setattr(outputs.shutil, "which", lambda n: None)
+    assert outputs._picker_command(tricky) is None

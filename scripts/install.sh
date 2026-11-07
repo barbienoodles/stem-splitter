@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installa Stem Splitter in un ambiente virtuale (.venv) dentro la cartella del progetto.
+# Installa Banana Split in un ambiente virtuale (.venv) dentro la cartella del progetto.
 # Funziona su macOS Intel, macOS Apple Silicon e Linux.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -135,4 +135,4 @@ if sys.argv[1] == "1" and platform.machine() != "arm64":
 print("✅ Installazione completata. Dispositivo:", pick_device().label)
 PY
 echo
-echo "Avvia con:  ./scripts/start.sh   (oppure doppio clic su 'Stem Splitter.command' su Mac)"
+echo "Avvia con:  ./scripts/start.sh   (oppure doppio clic su 'Banana Split.command' su Mac)"

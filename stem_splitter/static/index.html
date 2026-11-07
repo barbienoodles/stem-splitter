@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stem Splitter</title>
+  <title>Banana Split</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
-    <div class="brand"><span class="logo" aria-hidden="true"></span>Stem Splitter</div>
+    <div class="brand"><span class="logo" aria-hidden="true">🍌</span><span id="app-name">Banana Split</span></div>
     <div class="top-right">
       <div class="device" id="device">…</div>
       <button class="icon-btn sound" id="sound" type="button" title="Suoni della scimmietta"></button>
@@ -16,16 +16,28 @@
     </div>
   </header>
 
-  <main>
-    <section class="hero">
-      <h1>Separa voce e strumenti da qualsiasi brano</h1>
-      <p>Tutto avviene sul tuo computer: nessun upload su server esterni.</p>
+  <main class="studio">
+    <!-- a sinistra: cosa estrarre -->
+    <aside class="panel panel-left" aria-labelledby="h-stems">
+      <h2 id="h-stems">Cosa estraggo?</h2>
+      <div class="chips" id="stems" role="radiogroup" aria-labelledby="h-stems"></div>
+    </aside>
+
+    <!-- al centro: la scimmietta, che è anche la zona dove lasciare il file -->
+    <section class="stage">
+      <label class="drop scene" id="drop">
+        <input type="file" id="file" multiple hidden>
+        <div class="monkey" id="monkey">
+          <div class="mk-bubble" aria-live="polite"></div>
+        </div>
+      </label>
+      <p class="formats muted">MP3, MP4, WAV, AAC, M4A, FLAC, AIFF, OGG, OPUS, WMA, MOV… anche più file insieme.
+        Tutto resta sul tuo computer.</p>
     </section>
 
-    <section class="card">
-      <h2>1. Cosa vuoi estrarre?</h2>
-      <div class="chips" id="stems" role="radiogroup"></div>
-
+    <!-- a destra: impostazioni e cartella di destinazione -->
+    <aside class="panel panel-right" aria-labelledby="h-settings">
+      <h2 id="h-settings">Impostazioni</h2>
       <div class="options">
         <label>Profondità di calcolo
           <select id="quality"></select>
@@ -45,18 +57,26 @@
       </div>
       <p class="hint muted" id="hint"></p>
 
-      <h2>2. Carica il brano</h2>
-      <label class="drop scene" id="drop">
-        <input type="file" id="file" multiple hidden>
-        <div class="monkey" id="monkey">
-          <div class="mk-bubble" aria-live="polite"></div>
+      <h2>Dove salvo gli stem?</h2>
+      <div class="dest">
+        <label class="switch">
+          <input type="checkbox" id="save-to-folder" checked>
+          <span>Salva nella cartella</span>
+        </label>
+        <div class="dest-path" id="dest-path" title="">…</div>
+        <div class="dest-actions">
+          <button class="btn" id="pick-folder" type="button">Scegli cartella…</button>
         </div>
-        <span class="muted">Trascina il brano sulla scimmietta, oppure clicca per sceglierlo · MP3, MP4, WAV, AAC, M4A, FLAC, AIFF, OGG, OPUS, WMA, MOV… (anche più file insieme)</span>
-      </label>
-    </section>
-
-    <section id="jobs"></section>
+        <form class="dest-manual" id="dest-manual" hidden>
+          <input type="text" id="dest-input" placeholder="/percorso/della/cartella" autocomplete="off">
+          <button class="btn" type="submit">Usa</button>
+        </form>
+        <p class="muted small" id="dest-msg">Ogni brano finisce in una sua sottocartella. Puoi sempre scaricare gli stem anche dalla pagina.</p>
+      </div>
+    </aside>
   </main>
+
+  <section id="jobs"></section>
 
   <template id="job-tpl">
     <article class="card job">
@@ -69,6 +89,10 @@
       </div>
       <div class="progress"><div class="bar"></div></div>
       <div class="status muted"></div>
+      <div class="saved" hidden>
+        <span class="saved-path"></span>
+        <button class="btn reveal" type="button">Apri cartella</button>
+      </div>
       <div class="player" hidden>
         <div class="transport">
           <button class="play" aria-label="Riproduci">▶</button>

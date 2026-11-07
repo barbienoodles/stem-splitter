@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import os
-import re
 import tempfile
 import uuid
 import zipfile
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from . import outputs as out
+from .outputs import safe_name
 from .audio import BIT_DEPTHS, FORMATS, INPUT_EXTENSIONS, MP3_MAX_RATE, SAMPLE_RATES, validate_output
 from .jobs import JobManager
 from .separator import DEFAULT_STEM, MIDSIDE_MODES, QUALITIES, STEM_OPTIONS, Separator
@@ -25,10 +26,10 @@ MEDIA_TYPES = {"wav": "audio/wav", "flac": "audio/flac", "mp3": "audio/mpeg"}
 
 
 def default_workdir() -> Path:
-    return Path(os.environ.get("STEM_SPLITTER_HOME", Path.home() / ".stem-splitter")) / "jobs"
+    return out.app_home() / "jobs"
 
 
-APP_ID = "stem-splitter"
+APP_ID = "banana-split"
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
@@ -61,13 +62,6 @@ class HostCheckMiddleware:
         await self.app(scope, receive, send)
 
 
-_UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
-
-
-def safe_name(name: str) -> str:
-    """Nome di file sicuro su Mac, Windows e Linux (anche dentro uno zip)."""
-    name = _UNSAFE_NAME.sub("_", name).strip(" ._")
-    return name[:120] or "audio"
 
 
 def require_app_header(x_stem_splitter: str | None = Header(None)) -> None:
@@ -96,6 +90,7 @@ def create_app(
     def info():
         return {
             "app": APP_ID,
+            "name": out.APP_NAME,
             "can_shutdown": on_shutdown is not None,
             "version": __version__,
             "device": separator.info.device,
@@ -134,6 +129,7 @@ def create_app(
         samplerate: int = Form(44100),
         bit_depth: str = Form("24"),
         midside: str = Form("off"),
+        save_to_folder: bool = Form(False),
     ):
         if stem not in STEM_OPTIONS:
             raise HTTPException(400, f"Stem non valido: {stem}")
@@ -150,7 +146,8 @@ def create_app(
         tmp_path = await run_in_threadpool(_store_upload, file.file, manager.workdir)
         try:
             job = manager.submit(file.filename or "audio", tmp_path, stem, quality, format,
-                                 samplerate, bit_depth, midside)
+                                 samplerate, bit_depth, midside,
+                                 dest_dir=out.output_dir() if save_to_folder else None)
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
@@ -161,6 +158,55 @@ def create_app(
         if job is None:
             raise HTTPException(404, "Lavoro non trovato")
         return job
+
+    # ---------- cartella di destinazione ----------
+
+    def _settings() -> dict:
+        saved = out.load_settings()
+        return {
+            "output_dir": str(out.output_dir()),
+            "save_to_folder": bool(saved.get("save_to_folder", True)),
+            "can_pick_folder": out.can_pick_folder(),
+        }
+
+    @app.get("/api/settings")
+    def get_settings():
+        return _settings()
+
+    @app.post("/api/settings", dependencies=[Depends(require_app_header)])
+    def set_settings(body: dict = Body(...)):
+        changes = {}
+        if "output_dir" in body:
+            try:
+                changes["output_dir"] = str(out.validate_output_dir(str(body["output_dir"])))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc))
+        if "save_to_folder" in body:
+            changes["save_to_folder"] = bool(body["save_to_folder"])
+        out.save_settings(**changes)
+        return _settings()
+
+    @app.post("/api/pick-folder", dependencies=[Depends(require_app_header)])
+    async def pick_folder():
+        try:
+            chosen = await run_in_threadpool(out.pick_folder, out.output_dir())
+        except out.PickerUnavailable as exc:
+            raise HTTPException(501, str(exc))
+        if chosen is None:
+            return {**_settings(), "cancelled": True}
+        try:
+            out.save_settings(output_dir=str(out.validate_output_dir(str(chosen))))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return _settings()
+
+    @app.post("/api/jobs/{job_id}/reveal", dependencies=[Depends(require_app_header)])
+    def reveal_job(job_id: str):
+        job = _job(job_id)
+        if not job.export_dir or not job.export_dir.is_dir():
+            raise HTTPException(404, "Gli stem di questo lavoro non sono in una cartella")
+        out.reveal(job.export_dir)
+        return {"ok": True}
 
     @app.get("/api/jobs")
     def list_jobs():

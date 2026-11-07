@@ -1,4 +1,4 @@
-"""Riga di comando: `stem-splitter serve` (interfaccia web) e `stem-splitter split` (batch)."""
+"""Riga di comando: `banana-split serve` (interfaccia web) e `banana-split split` (batch)."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _serve(args) -> None:
     print(f"Dispositivo: {sep.info.label}")
     hosts = list(LOCAL_HOSTS)
     if args.host in ("0.0.0.0", "::"):
-        print("⚠️  In ascolto su tutte le interfacce: chiunque sulla tua rete può usare Stem Splitter "
+        print("⚠️  In ascolto su tutte le interfacce: chiunque sulla tua rete può usare Banana Split "
               "(non c'è autenticazione).")
         hosts = ["*"]
     elif args.host not in LOCAL_HOSTS:
@@ -68,7 +68,7 @@ def _split(args) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="stem-splitter", description="Separa i brani in stem.")
+    parser = argparse.ArgumentParser(prog="banana-split", description="Banana Split: separa i brani in stem.")
     parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default=None,
                         help="dispositivo di calcolo (default: automatico)")
     sub = parser.add_subparsers(dest="command")

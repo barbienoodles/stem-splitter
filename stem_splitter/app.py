@@ -2,7 +2,7 @@
 
 - avvia il server su una porta libera e apre il browser;
 - se l'app è già aperta, riapre solo la pagina invece di avviarne una seconda;
-- senza finestra di terminale: i messaggi vanno in ~/.stem-splitter/stem-splitter.log;
+- senza finestra di terminale: i messaggi vanno in ~/.banana-split/banana-split.log;
 - l'app si chiude dal pulsante "Chiudi l'app" nella pagina;
 - `--self-test` verifica il pacchetto (PyTorch, Demucs, ffmpeg, server) senza scaricare modelli.
 """
@@ -21,20 +21,20 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-APP_ID = "stem-splitter"
+APP_ID = "banana-split"
 DEFAULT_PORT = 8765
 
 
 def app_home() -> Path:
-    home = Path(os.environ.get("STEM_SPLITTER_HOME", Path.home() / ".stem-splitter"))
-    home.mkdir(parents=True, exist_ok=True)
-    return home
+    from .outputs import app_home as _home
+
+    return _home()
 
 
 def _setup_environment(log_to_file: bool) -> None:
     # Nelle app senza console stdout/stderr non esistono (o non li legge nessuno): su file.
     if log_to_file or sys.stdout is None or sys.stderr is None:
-        log = open(app_home() / "stem-splitter.log", "a", buffering=1, encoding="utf-8")
+        log = open(app_home() / "banana-split.log", "a", buffering=1, encoding="utf-8")
         sys.stdout = sys.stderr = log
     # Il Python incluso nelle app per Mac non trova i certificati di sistema:
     # senza questo il primo download dei modelli fallirebbe con CERTIFICATE_VERIFY_FAILED.
@@ -48,7 +48,7 @@ def _setup_environment(log_to_file: bool) -> None:
 
 
 def _probe(port: int) -> bool:
-    """True se su questa porta risponde già Stem Splitter."""
+    """True se su questa porta risponde già Banana Split."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/info", timeout=1) as r:
             return json.load(r).get("app") == APP_ID
@@ -79,7 +79,7 @@ def _make_server(app, port: int):
 
 def run(port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
     if _probe(port):  # già aperta: riapri solo la pagina
-        print(f"Stem Splitter è già in esecuzione sulla porta {port}")
+        print(f"Banana Split è già in esecuzione sulla porta {port}")
         if open_browser:
             webbrowser.open(f"http://127.0.0.1:{port}/")
         return
@@ -158,7 +158,7 @@ def self_test() -> int:
             info = json.load(r)
         assert info["app"] == APP_ID and info["can_shutdown"], info
         with urllib.request.urlopen(base + "/", timeout=5) as r:
-            assert b"Stem Splitter" in r.read()
+            assert b"Banana Split" in r.read()
         req = urllib.request.Request(base + "/api/shutdown", method="POST",
                                      headers={"X-Stem-Splitter": "1"})
         urllib.request.urlopen(req, timeout=5).read()
@@ -171,7 +171,7 @@ def self_test() -> int:
 
 def main(argv: list[str] | None = None) -> None:
     multiprocessing.freeze_support()
-    parser = argparse.ArgumentParser(prog="stem-splitter-app")
+    parser = argparse.ArgumentParser(prog="banana-split-app")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--self-test", action="store_true")

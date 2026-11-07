@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Stem Splitter
+Name=Banana Split
 Comment=Separa voce, batteria e strumenti da qualsiasi brano
-Exec=StemSplitter
-Icon=stem-splitter
+Exec=BananaSplit
+Icon=banana-split
 Categories=AudioVideo;Audio;
 Terminal=false
