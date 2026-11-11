@@ -9,20 +9,27 @@ const trackLabel = (name) => {
   const m = name.match(/^(.*)_(mid|side)$/);
   return m ? `${LABELS[m[1]] || m[1]} · ${m[2] === "mid" ? "Mid" : "Side"}` : LABELS[name] || name;
 };
-const CHIP_TEXT = {
-  vocals_drums: ["Voce + batteria", "Voce, batteria, strumentale"],
-  vocals: ["Voce", "Voce + strumentale (karaoke)"],
-  drums: ["Batteria", "Batteria + resto"],
-  bass: ["Basso", "Basso + resto"],
-  guitar: ["Chitarra", "Chitarra + resto"],
-  piano: ["Piano", "Piano + resto"],
-  all4: ["4 stem", "Voce, batteria, basso, altro"],
-  all6: ["6 stem", "Anche chitarra e piano"],
+// Menu "Cosa separo?": [nome breve (usato anche nell'elenco dei lavori), voce del menu, nota]
+const STEM_TEXT = {
+  vocals_drums: ["Voce + batteria", "Voce + batteria + strumentale",
+    "Lo «strumentale» è il resto: basso e altri strumenti, senza voce e senza batteria."],
+  all4: ["4 stem", "4 stem", ""],
+  all6: ["6 stem", "6 stem (+ chitarra e piano)",
+    "Usa il modello a 6 stem: separare chitarra e piano è meno preciso che per il resto."],
+  vocals: ["Voce", "Voce (karaoke)", "Lo «strumentale» è tutto tranne la voce: la base per cantarci sopra."],
+  drums: ["Batteria", "Batteria", ""],
+  bass: ["Basso", "Basso", ""],
+  guitar: ["Chitarra", "Chitarra", "Usa il modello a 6 stem."],
+  piano: ["Piano", "Piano", "Usa il modello a 6 stem."],
 };
+const STEM_GROUPS = [
+  ["Più stem insieme", ["vocals_drums", "all4", "all6"]],
+  ["Uno solo, più tutto il resto", ["vocals", "drums", "bass", "guitar", "piano"]],
+];
 const COLORS = ["#7c5cff", "#19d3c5", "#ff8a3d", "#e3b341", "#ff5c7a", "#4ea8ff"];
 
 const $ = (sel, root = document) => root.querySelector(sel);
-const state = { stem: "vocals_drums", info: null, saveToFolder: true };
+const state = { stem: "vocals_drums", info: null, canPick: false };
 let monkey = null;
 const RATE_LABEL = (r) => `${(r / 1000).toLocaleString("it-IT")} kHz`;
 const BITS_LABEL = { "16": "16 bit", "24": "24 bit", "32f": "32 bit float" };
@@ -54,20 +61,16 @@ async function init() {
   $("#device").textContent = `⚡ ${info.device_label}`;
   $("#device").title = info.platform;
 
-  const chips = $("#stems");
-  for (const s of info.stems) {
-    const [name, desc] = CHIP_TEXT[s.key] || [s.label, ""];
-    const b = document.createElement("button");
-    b.className = "chip";
-    b.type = "button";
-    b.setAttribute("role", "radio");
-    b.dataset.key = s.key;
-    b.innerHTML = `<span class="name"></span><span class="desc"></span>`;
-    b.querySelector(".name").textContent = name;
-    b.querySelector(".desc").textContent = desc;
-    b.addEventListener("click", () => selectStem(s.key));
-    chips.appendChild(b);
+  const menu = $("#stems");
+  for (const [title, keys] of STEM_GROUPS) {
+    const group = document.createElement("optgroup");
+    group.label = title;
+    for (const key of keys) {
+      if (info.stems.some((x) => x.key === key)) group.append(new Option(STEM_TEXT[key][1], key));
+    }
+    menu.append(group);
   }
+  menu.addEventListener("change", () => selectStem(menu.value));
   state.stem = info.default_stem;
   selectStem(state.stem);
 
@@ -83,6 +86,7 @@ async function init() {
   $("#file").accept = ["audio/*", "video/*", ...info.input_extensions].join(",");
 
   monkey = new Monkey($("#monkey"));
+  initInfo();
   initDestination().catch((e) => { $("#dest-msg").textContent = `Cartella non disponibile: ${e.message}`; });
   const soundBtn = $("#sound");
   const showSound = () => { soundBtn.textContent = monkey.sound ? "🔊" : "🔇"; soundBtn.setAttribute("aria-pressed", monkey.sound); };
@@ -92,7 +96,7 @@ async function init() {
     $("#quit").hidden = false;
     $("#quit").onclick = async () => {
       try { await api("/api/shutdown", { method: "POST" }); } catch {}
-      document.body.innerHTML = '<main class="closed"><h1>Stem Splitter è chiuso 👋</h1><p class="muted">Puoi chiudere questa scheda. Per riaprirlo, avvia di nuovo l\'app.</p></main>';
+      document.body.innerHTML = `<main class="closed"><h1>${state.info.name || "Banana Split"} è chiuso 👋</h1><p class="muted">Puoi chiudere questa scheda. Per riaprirlo, avvia di nuovo l'app.</p></main>`;
     };
   }
 
@@ -123,7 +127,21 @@ async function init() {
 
 function selectStem(key) {
   state.stem = key;
-  document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-checked", c.dataset.key === key));
+  $("#stems").value = key;
+  // "Ottieni: …": i file che usciranno, così non serve indovinare cosa fa ogni voce
+  const outputs = state.info?.stems.find((x) => x.key === key)?.outputs || [];
+  const gets = $("#stem-gets");
+  gets.textContent = "";
+  const label = document.createElement("b");
+  label.textContent = "Ottieni: ";
+  gets.append(label, document.createTextNode(outputs.map((n) => LABELS[n] || n).join(" · ")));
+  const note = STEM_TEXT[key]?.[2];
+  if (note) {
+    const small = document.createElement("span");
+    small.className = "note";
+    small.textContent = note;
+    gets.append(document.createElement("br"), small);
+  }
   updateOptions();
 }
 
@@ -149,8 +167,9 @@ function updateOptions() {
   }
   if (+rate.value > 44100) hints.push("La separazione avviene a 44,1 kHz; l'uscita viene ricampionata con SoX VHQ.");
   if (fmt === "mp3") hints.push("MP3 a 320 kbps.");
-  if ($("#midside").value !== "off") hints.push("Mid = (L+R)/2, Side = (L−R)/2, file mono. Nel mixer partono in muto.");
   $("#hint").textContent = hints.join(" ");
+  $("#hint-ms").textContent = $("#midside").value === "off" ? "" :
+    "Mid = (L+R)/2, Side = (L−R)/2, file mono. Nel mixer partono in muto.";
 }
 
 async function upload(file) {
@@ -171,12 +190,13 @@ async function upload(file) {
   fd.append("samplerate", $("#samplerate").value);
   fd.append("bit_depth", $("#bitdepth").value);
   fd.append("midside", $("#midside").value);
-  fd.append("save_to_folder", state.saveToFolder ? "true" : "false");
+  // la casella è la fonte di verità: lo stato salvato può essere in ritardo di un attimo
+  fd.append("save_to_folder", $("#save-to-folder").checked ? "true" : "false");
   try {
     const job = await api("/api/jobs", { method: "POST", body: fd });
     const qLabel = state.info.qualities[job.quality] || job.quality;
     const bitsLabel = job.format === "mp3" ? "320 kbps" : BITS_LABEL[job.format === "flac" && job.bit_depth === "32f" ? "24" : job.bit_depth];
-    $(".job-sub", el).textContent = [CHIP_TEXT[job.stem]?.[0] || job.stem, qLabel.split(" (")[0],
+    $(".job-sub", el).textContent = [STEM_TEXT[job.stem]?.[0] || job.stem, qLabel.split(" (")[0],
       `${job.format.toUpperCase()} ${RATE_LABEL(job.samplerate)} ${bitsLabel}`,
       job.midside !== "off" ? "Mid/Side" : null].filter(Boolean).join(" · ");
     $(".remove", el).onclick = async () => {
@@ -467,15 +487,12 @@ document.addEventListener("keydown", (e) => {
 // ---------- cartella di destinazione ----------
 
 function renderDestination(settings) {
-  state.saveToFolder = settings.save_to_folder;
+  state.canPick = settings.can_pick_folder;
   $("#save-to-folder").checked = settings.save_to_folder;
-  $(".dest").classList.toggle("off", !settings.save_to_folder);
-  $("#dest-path").textContent = settings.output_dir;
-  $("#dest-path").title = settings.output_dir;
+  $("#dest").classList.toggle("off", !settings.save_to_folder);
+  $("#dest-path").textContent = settings.output_dir_short || settings.output_dir;
+  $("#pick-folder").title = settings.output_dir;
   $("#dest-input").value = settings.output_dir;
-  // senza finestra di sistema (es. Linux senza zenity) si scrive il percorso a mano
-  $("#pick-folder").hidden = !settings.can_pick_folder;
-  $("#dest-manual").hidden = settings.can_pick_folder;
 }
 
 async function saveSettings(changes) {
@@ -488,33 +505,63 @@ async function saveSettings(changes) {
 
 async function initDestination() {
   renderDestination(await api("/api/settings"));
-  const msg = $("#dest-msg"), defaultMsg = msg.textContent;
+  const msg = $("#dest-msg"), manual = $("#dest-manual");
+  let clearTimer = null;
+  const say = (text, ms = 0) => {
+    msg.textContent = text;
+    clearTimeout(clearTimer);
+    if (ms) clearTimer = setTimeout(() => { msg.textContent = ""; }, ms);
+  };
+  const showManual = () => { manual.hidden = false; $("#dest-input").focus(); };
+
   $("#save-to-folder").addEventListener("change", (e) => {
-    saveSettings({ save_to_folder: e.target.checked }).catch((err) => { msg.textContent = err.message; });
+    saveSettings({ save_to_folder: e.target.checked }).catch((err) => say(err.message));
   });
+
+  // il pulsante apre la finestra del Finder (o di Esplora file) per scegliere la cartella
   $("#pick-folder").addEventListener("click", async () => {
+    if (!state.canPick) { showManual(); return; }  // niente finestra di sistema: si scrive il percorso
     const btn = $("#pick-folder");
     btn.disabled = true;
-    msg.textContent = "Si è aperta una finestra per scegliere la cartella (se non la vedi, è dietro al browser).";
+    say("Si è aperta una finestra per scegliere la cartella (se non la vedi, è dietro al browser).");
     try {
       const res = await api("/api/pick-folder", { method: "POST" });
       renderDestination(res);
-      msg.textContent = res.cancelled ? defaultMsg : "Fatto! Gli stem andranno qui.";
+      say(res.cancelled ? "" : "Fatto! Gli stem andranno qui.", 4000);
     } catch (err) {
-      msg.textContent = err.message;
-      $("#dest-manual").hidden = false;
+      say(err.message);
+      showManual();
     } finally {
       btn.disabled = false;
     }
   });
-  $("#dest-manual").addEventListener("submit", async (e) => {
+
+  // la freccia apre la cartella corrente nel Finder
+  $("#open-folder").addEventListener("click", async () => {
+    try { await api("/api/reveal-output", { method: "POST" }); say(""); }
+    catch (err) { say(err.message); }
+  });
+
+  manual.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
       await saveSettings({ output_dir: $("#dest-input").value });
-      msg.textContent = "Fatto! Gli stem andranno qui.";
+      say("Fatto! Gli stem andranno qui.", 4000);
+      manual.hidden = !!state.canPick;
     } catch (err) {
-      msg.textContent = err.message;
+      say(err.message);
     }
+  });
+}
+
+// la "i" sotto la scimmietta: informazioni a scomparsa (si chiude con un clic fuori o con Esc)
+function initInfo() {
+  const btn = $("#info-btn"), pop = $("#info-pop");
+  const set = (open) => { pop.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
+  btn.addEventListener("click", (e) => { e.stopPropagation(); set(pop.hidden); });
+  document.addEventListener("click", (e) => { if (!pop.hidden && !pop.contains(e.target)) set(false); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !pop.hidden) { set(false); btn.focus(); }
   });
 }
 

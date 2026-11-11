@@ -1,5 +1,6 @@
 """Test end-to-end con un HTDemucs piccolo a pesi casuali (nessun download richiesto)."""
 
+import os
 import time
 from pathlib import Path
 
@@ -484,10 +485,12 @@ def test_settings_default_and_update(tmp_path, _isolated_home):
     c = _app_client(tmp_path)
     s = c.get("/api/settings").json()
     assert s["output_dir"] == str(_isolated_home / "Music" / "Banana Split")
+    assert s["output_dir_short"] == "~" + os.sep + os.path.join("Music", "Banana Split")
     assert s["save_to_folder"] is True
     dest = tmp_path / "Stem miei"
     s = c.post("/api/settings", json={"output_dir": str(dest), "save_to_folder": False}).json()
     assert s["output_dir"] == str(dest) and dest.is_dir() and s["save_to_folder"] is False
+    assert s["output_dir_short"] == str(dest)  # fuori dalla cartella personale: percorso completo
     # ricordata al riavvio (nuovo server)
     assert _app_client(tmp_path).get("/api/settings").json()["output_dir"] == str(dest)
 
@@ -589,3 +592,35 @@ def test_picker_commands_by_platform(monkeypatch, tmp_path):
     monkeypatch.setattr(outputs.sys, "platform", "linux")
     monkeypatch.setattr(outputs.shutil, "which", lambda n: None)
     assert outputs._picker_command(tricky) is None
+
+
+# --- pulsante "Dove salvo gli stem?": apertura della cartella corrente ------------------
+
+
+def test_reveal_output_folder_creates_and_opens_it(tmp_path, _isolated_home, monkeypatch):
+    from stem_splitter import outputs
+
+    opened = []
+    monkeypatch.setattr(outputs, "reveal", lambda p: opened.append(p))
+    c = _app_client(tmp_path)
+    r = c.post("/api/reveal-output")
+    assert r.status_code == 200
+    expected = _isolated_home / "Music" / "Banana Split"
+    assert opened == [expected] and expected.is_dir()
+    # senza l'header dell'app non si può chiedere di aprire cartelle
+    from stem_splitter.server import create_app
+
+    bare = _local_client(create_app(FakeSeparator("cpu"), tmp_path / "jobs2"))
+    assert bare.post("/api/reveal-output").status_code == 403
+
+
+def test_reveal_without_file_manager_is_a_clean_error(tmp_path, monkeypatch):
+    from stem_splitter import outputs
+
+    def no_opener(*a, **k):
+        raise FileNotFoundError("xdg-open")
+
+    monkeypatch.setattr(outputs.subprocess, "Popen", no_opener)
+    with pytest.raises(RuntimeError, match="aprire la cartella"):
+        outputs.reveal(tmp_path)
+    assert _app_client(tmp_path).post("/api/reveal-output").status_code == 501

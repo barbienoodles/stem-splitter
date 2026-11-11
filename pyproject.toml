@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "banana-split"
-version = "0.2.0"
+version = "0.2.1"
 description = "Separazione di brani in stem (voce, batteria, basso, chitarra, piano, altro) in locale, su Intel e Apple Silicon."
 readme = "README.md"
 # Intel Mac: PyTorch non pubblica più wheel per macOS x86_64 dopo la 2.2.x,

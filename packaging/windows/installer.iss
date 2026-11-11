@@ -1,7 +1,7 @@
 ; Inno Setup: crea BananaSplit-Setup.exe da dist\BananaSplit (PyInstaller).
-; Compilare dalla radice del repository: iscc /DAppVersion=0.2.0 packaging\windows\installer.iss
+; Compilare dalla radice del repository: iscc /DAppVersion=0.2.1 packaging\windows\installer.iss
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.2.1"
 #endif
 
 [Setup]

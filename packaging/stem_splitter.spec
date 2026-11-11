@@ -11,7 +11,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 ROOT = Path(SPECPATH).parent
 PKG = ROOT / "packaging"
 NAME = "BananaSplit"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 # ffmpeg incluso in imageio-ffmpeg: va tra i "binaries" per mantenere il permesso di esecuzione
 ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe())
