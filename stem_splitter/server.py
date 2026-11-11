@@ -165,6 +165,7 @@ def create_app(
         saved = out.load_settings()
         return {
             "output_dir": str(out.output_dir()),
+            "output_dir_short": out.display_path(out.output_dir()),
             "save_to_folder": bool(saved.get("save_to_folder", True)),
             "can_pick_folder": out.can_pick_folder(),
         }
@@ -205,8 +206,23 @@ def create_app(
         job = _job(job_id)
         if not job.export_dir or not job.export_dir.is_dir():
             raise HTTPException(404, "Gli stem di questo lavoro non sono in una cartella")
-        out.reveal(job.export_dir)
+        try:
+            out.reveal(job.export_dir)
+        except RuntimeError as exc:
+            raise HTTPException(501, str(exc))
         return {"ok": True}
+
+    @app.post("/api/reveal-output", dependencies=[Depends(require_app_header)])
+    def reveal_output():
+        """Apre nel Finder / Esplora file la cartella di destinazione corrente (la crea se manca)."""
+        try:
+            folder = out.validate_output_dir(str(out.output_dir()))
+            out.reveal(folder)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(501, str(exc))
+        return {"ok": True, "output_dir": str(folder)}
 
     @app.get("/api/jobs")
     def list_jobs():

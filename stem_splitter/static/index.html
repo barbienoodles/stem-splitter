@@ -17,10 +17,16 @@
   </header>
 
   <main class="studio">
-    <!-- a sinistra: cosa estrarre -->
+    <!-- a sinistra: cosa separare -->
     <aside class="panel panel-left" aria-labelledby="h-stems">
-      <h2 id="h-stems">Cosa estraggo?</h2>
-      <div class="chips" id="stems" role="radiogroup" aria-labelledby="h-stems"></div>
+      <h2 id="h-stems">Cosa separo?</h2>
+      <select id="stems" aria-labelledby="h-stems"></select>
+      <p class="gets" id="stem-gets" aria-live="polite"></p>
+
+      <label class="field">Mid/Side
+        <select id="midside"></select>
+      </label>
+      <p class="hint muted small" id="hint-ms"></p>
     </aside>
 
     <!-- al centro: la scimmietta, che è anche la zona dove lasciare il file -->
@@ -31,13 +37,46 @@
           <div class="mk-bubble" aria-live="polite"></div>
         </div>
       </label>
-      <p class="formats muted">MP3, MP4, WAV, AAC, M4A, FLAC, AIFF, OGG, OPUS, WMA, MOV… anche più file insieme.
-        Tutto resta sul tuo computer.</p>
+
+      <div class="under-monkey">
+        <div class="dest" id="dest">
+          <div class="dest-row">
+            <button class="dest-btn" id="pick-folder" type="button">
+              <span class="dest-title">📁 Dove salvo gli stem?</span>
+              <span class="dest-path" id="dest-path">…</span>
+            </button>
+            <button class="open-folder" id="open-folder" type="button"
+                    title="Apri la cartella" aria-label="Apri la cartella degli stem">↗</button>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="save-to-folder" checked>
+            <span>Copia gli stem nella cartella a fine lavoro</span>
+          </label>
+          <form class="dest-manual" id="dest-manual" hidden>
+            <input type="text" id="dest-input" placeholder="/percorso/della/cartella"
+                   autocomplete="off" aria-label="Percorso della cartella">
+            <button class="btn" type="submit">Usa</button>
+          </form>
+          <p class="muted small" id="dest-msg" aria-live="polite"></p>
+        </div>
+
+        <div class="info">
+          <button class="info-btn" id="info-btn" type="button" aria-expanded="false"
+                  aria-controls="info-pop" aria-label="Informazioni: file accettati e privacy">i</button>
+          <div class="info-pop" id="info-pop" role="region" aria-label="Informazioni" hidden>
+            <p><b>File accettati</b><br>MP3, MP4, WAV, AAC, M4A, FLAC, AIFF, OGG, OPUS, WMA, MOV…
+              Anche più file insieme: da un video si usa la traccia audio.</p>
+            <p><b>Privacy</b><br>Tutto resta sul tuo computer: nessun upload su server esterni.</p>
+            <p><b>Dove finiscono gli stem</b><br>Ogni brano va in una sottocartella
+              «<i>brano - Banana Split</i>», che non viene mai sovrascritta.</p>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <!-- a destra: impostazioni e cartella di destinazione -->
+    <!-- a destra: come separare -->
     <aside class="panel panel-right" aria-labelledby="h-settings">
-      <h2 id="h-settings">Impostazioni</h2>
+      <h2 id="h-settings">Come separo?</h2>
       <div class="options">
         <label>Profondità di calcolo
           <select id="quality"></select>
@@ -51,28 +90,8 @@
         <label>Profondità in bit
           <select id="bitdepth"></select>
         </label>
-        <label>Mid/Side
-          <select id="midside"></select>
-        </label>
       </div>
-      <p class="hint muted" id="hint"></p>
-
-      <h2>Dove salvo gli stem?</h2>
-      <div class="dest">
-        <label class="switch">
-          <input type="checkbox" id="save-to-folder" checked>
-          <span>Salva nella cartella</span>
-        </label>
-        <div class="dest-path" id="dest-path" title="">…</div>
-        <div class="dest-actions">
-          <button class="btn" id="pick-folder" type="button">Scegli cartella…</button>
-        </div>
-        <form class="dest-manual" id="dest-manual" hidden>
-          <input type="text" id="dest-input" placeholder="/percorso/della/cartella" autocomplete="off">
-          <button class="btn" type="submit">Usa</button>
-        </form>
-        <p class="muted small" id="dest-msg">Ogni brano finisce in una sua sottocartella. Puoi sempre scaricare gli stem anche dalla pagina.</p>
-      </div>
+      <p class="hint muted small" id="hint"></p>
     </aside>
   </main>
 

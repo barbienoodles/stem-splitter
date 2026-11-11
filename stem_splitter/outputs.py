@@ -36,6 +36,14 @@ def app_home() -> Path:
     return path
 
 
+def display_path(path: Path) -> str:
+    """Percorso breve per l'interfaccia: la cartella personale diventa "~"."""
+    try:
+        return "~" + os.sep + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
 def default_output_dir() -> Path:
     music = Path.home() / "Music"
     return (music if music.is_dir() else Path.home()) / APP_NAME
@@ -182,4 +190,7 @@ def reveal(path: Path) -> None:
         cmd = ["explorer", str(path)]
     else:
         cmd = ["xdg-open", str(path)]
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:  # es. Linux senza xdg-open
+        raise RuntimeError(f"Non riesco ad aprire la cartella ({exc.__class__.__name__}): {path}") from exc

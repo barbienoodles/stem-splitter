@@ -79,19 +79,34 @@ vengono scaricati automaticamente e salvati in cache.
 oppure doppio clic su **`Banana Split.command`** nel Finder. Si apre il browser su
 `http://localhost:8000`:
 
-La scimmietta è al centro; **a sinistra** scegli cosa estrarre, **a destra** le impostazioni e la
-cartella di destinazione.
+La scimmietta è al centro. **A sinistra** («Cosa separo?») scegli cosa estrarre con un menu a tendina e,
+sotto, il Mid/Side; **a destra** («Come separo?») qualità, formato, frequenza e profondità in bit;
+**sotto la scimmietta** c'è il pulsante per scegliere la cartella e la **i** con le informazioni.
 
-1. scegli cosa estrarre: di default **voce + batteria + strumentale**, oppure voce, batteria,
-   basso, chitarra, piano, 4 stem, 6 stem;
-2. scegli profondità di calcolo, formato, frequenza di campionamento, profondità in bit e Mid/Side;
-3. **dove salvo gli stem?** Con *Scegli cartella…* si apre la finestra del sistema (Finder,
-   Esplora file, oppure zenity/kdialog su Linux; senza, si scrive il percorso a mano). La scelta viene
-   ricordata. Di default è `Musica/Banana Split`; ogni brano finisce in una sottocartella
-   `<brano> - Banana Split` (mai sovrascritta: se esiste diventa `(2)`, `(3)`…). Togliendo la spunta
-   *Salva nella cartella* gli stem restano solo da scaricare dalla pagina;
-4. trascina uno o più file (qualsiasi audio o video: MP3, MP4, WAV, AAC, M4A, FLAC, AIFF, OGG,
-   OPUS, WMA, MOV, MKV…; da un video viene presa la traccia audio). Al termine puoi ascoltare
+1. **Cosa separo?** Il menu ha due gruppi, e sotto compare sempre la riga *Ottieni: …* con i file che usciranno:
+
+   | Voce del menu | File ottenuti |
+   |---|---|
+   | **Più stem insieme** | |
+   | Voce + batteria + strumentale (predefinita) | voce, batteria, strumentale (= basso e resto, senza voce né batteria) |
+   | 4 stem | voce, batteria, basso, altro |
+   | 6 stem (+ chitarra e piano) | voce, batteria, basso, chitarra, piano, altro |
+   | **Uno solo, più tutto il resto** | |
+   | Voce (karaoke) | voce, strumentale (= tutto tranne la voce) |
+   | Batteria · Basso · Chitarra · Piano | lo stem, più «senza …» |
+
+   *Voce (karaoke)* e *Voce + batteria + strumentale* **non** sono la stessa cosa: la prima dà 2 file e lo
+   strumentale ha ancora la batteria; la seconda ne dà 3 e lo strumentale non ha né voce né batteria.
+2. **Mid/Side** (sotto il menu): nessuno, solo del mix, oppure del mix e di ogni stem;
+3. **Come separo?** profondità di calcolo, formato, frequenza di campionamento, profondità in bit;
+4. **Dove salvo gli stem?** Il pulsante sotto la scimmietta apre la finestra del sistema (Finder,
+   Esplora file, oppure zenity/kdialog su Linux; senza, si scrive il percorso a mano); la freccia ↗
+   accanto apre la cartella corrente. La scelta viene ricordata. Di default è `Musica/Banana Split`;
+   ogni brano finisce in una sottocartella `<brano> - Banana Split` (mai sovrascritta: se esiste
+   diventa `(2)`, `(3)`…). Togliendo la spunta *Copia gli stem nella cartella a fine lavoro* gli stem
+   restano solo da scaricare dalla pagina;
+5. trascina uno o più file sulla scimmietta, o clicca su di lei (la **i** elenca i formati accettati:
+   qualsiasi audio o video; da un video viene presa la traccia audio). Al termine puoi ascoltare
    gli stem in sincrono con mute/solo/volume, cliccare sulla forma d'onda per spostarti,
    aprire la cartella con *Apri cartella* oppure scaricare i singoli file o lo zip.
 
@@ -175,6 +190,7 @@ I test usano un piccolo HTDemucs con pesi casuali, quindi non scaricano nulla.
 | POST | `/api/jobs` | multipart: `file`, `stem`, `quality`, `format`, `samplerate`, `bit_depth`, `midside`, `save_to_folder` |
 | GET / POST | `/api/settings` | cartella di destinazione (`output_dir`) e `save_to_folder` |
 | POST | `/api/pick-folder` | apre la finestra di sistema per scegliere la cartella |
+| POST | `/api/reveal-output` | apre nel Finder/Esplora file la cartella di destinazione corrente |
 | POST | `/api/jobs/{id}/reveal` | apre nel Finder/Esplora file la cartella con gli stem |
 | GET | `/api/jobs/{id}` | stato, avanzamento, elenco stem |
 | GET | `/api/jobs/{id}/stems/{nome}` | scarica uno stem |

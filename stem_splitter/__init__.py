@@ -7,4 +7,4 @@ import os
 # Deve essere impostata prima del primo import di torch.
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
