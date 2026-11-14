@@ -37,11 +37,12 @@ a = Analysis(
     hiddenimports=hiddenimports,
     excludes=["tkinter", "matplotlib", "IPython", "tensorboard", "pytest", "torchaudio",
               "torchvision", "sphn", "dora", "hydra", "submitit", "musdb", "museval",
-              # mai importati durante una separazione (tracciato con htdemucs, _ft e _6s): compilatore,
-              # esportazione ONNX e le loro dipendenze. Se servissero, l'app fallirebbe con ImportError
-              # (rilevato dal self-test), non cambierebbe i risultati.
+              # mai importati durante una separazione (verificato con sys.modules dopo il self-test e una
+              # separazione reale): compilatore, esportazione ONNX e le loro dipendenze. Se servissero,
+              # l'app fallirebbe con ImportError (lo rileva il self-test), non cambierebbe i risultati.
+              # NON escludere torchgen: `import torch` lo carica (torch.nn.modules.module).
               "torch._inductor", "torch._dynamo", "torch.onnx", "torch._numpy", "torch._vendor.quack",
-              "torchgen", "functorch", "sympy", "mpmath", "networkx", "jinja2", "fsspec", "setuptools"],
+              "functorch", "sympy", "mpmath", "networkx", "jinja2", "fsspec", "setuptools"],
     noarchive=False,
 )
 
