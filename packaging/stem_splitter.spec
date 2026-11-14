@@ -42,7 +42,9 @@ a = Analysis(
               # l'app fallirebbe con ImportError (lo rileva il self-test), non cambierebbe i risultati.
               # NON escludere torchgen: `import torch` lo carica (torch.nn.modules.module).
               "torch._inductor", "torch._dynamo", "torch.onnx", "torch._numpy", "torch._vendor.quack",
-              "functorch", "sympy", "mpmath", "networkx", "jinja2", "fsspec", "setuptools"],
+              "functorch", "sympy", "mpmath", "networkx", "jinja2", "fsspec", "setuptools",
+              "pkg_resources", "filelock", "torch.utils.benchmark",
+              "xmlrpc", "pydoc_data", "readline", "sqlite3"],
     noarchive=False,
 )
 

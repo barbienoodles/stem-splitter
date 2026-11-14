@@ -113,6 +113,10 @@ jobs:
           python -c "import torch, numpy; print('torch', torch.__version__, 'numpy', numpy.__version__)"
 
       - name: PyInstaller
+        env:
+          # archivio Python non compresso: lo comprime meglio il pacchetto finale (zstd/lzma/lzma2);
+          # sul Mac Intel (lzfse) si lascia il default. Stesso bytecode, stessi risultati.
+          PYINSTALLER_ZLIB_COMPRESSION_LEVEL: ${{ matrix.arch == 'Intel' && '6' || '0' }}
         run: pyinstaller --noconfirm --clean packaging/stem_splitter.spec
 
       # ---------- macOS ----------
@@ -186,7 +190,13 @@ jobs:
           echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool" | sha256sum -c -
           chmod +x appimagetool
           out="dist/BananaSplit-${{ steps.ver.outputs.version }}-Linux-x86_64.AppImage"
-          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool $app "$out"
+          # runtime dell'AppImage incluso nel repository (AppImage/type2-runtime, verificato) invece
+          # di scaricarlo senza controllo; zstd livello 19 a blocchi da 1 MB (il runtime legge solo zstd/gzip)
+          echo "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46  packaging/linux/runtime-x86_64" | sha256sum -c -
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --runtime-file packaging/linux/runtime-x86_64 \
+            --mksquashfs-opt -Xcompression-level --mksquashfs-opt 19 \
+            --mksquashfs-opt -b --mksquashfs-opt 1M \
+            $app "$out"
           APPIMAGE_EXTRACT_AND_RUN=1 "$out" --self-test
           ls -lh "$out"
 
