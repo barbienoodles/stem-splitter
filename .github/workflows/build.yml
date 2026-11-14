@@ -33,6 +33,11 @@ jobs:
   build:
     name: ${{ matrix.name }}
     needs: tests
+    permissions:
+      contents: read
+      # solo per l'attestazione di provenienza (usata nelle build delle Release)
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -179,6 +184,15 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 "$out" --self-test
           ls -lh "$out"
 
+      # Attestazione firmata da GitHub: certifica che l'installer è stato costruito da questo
+      # repository, da questo commit, con questo workflow. Chi lo scarica può verificarlo con
+      # `gh attestation verify <file> --repo barbienoodles/stem-splitter`.
+      - name: Attestazione di provenienza
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: ${{ matrix.kind == 'mac' && 'dist/*.dmg' || (matrix.kind == 'windows' && 'dist/*-Setup.exe' || 'dist/*.AppImage') }}
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: BananaSplit-${{ matrix.kind }}-${{ matrix.arch || 'x64' }}
@@ -205,6 +219,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # impronte SHA-256 di tutti gli installer, pubblicate insieme a loro
+          (cd out && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
           ls -lh out
           # la Release può essere già stata creata dal sito di GitHub (che crea anche il tag):
           # in quel caso si aggiungono solo gli installer

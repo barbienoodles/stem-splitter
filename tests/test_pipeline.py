@@ -624,3 +624,101 @@ def test_reveal_without_file_manager_is_a_clean_error(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="aprire la cartella"):
         outputs.reveal(tmp_path)
     assert _app_client(tmp_path).post("/api/reveal-output").status_code == 501
+
+
+# --- sicurezza: niente codice eseguito da file manomessi -------------------------------
+
+
+def _fake_model_setup(monkeypatch, tmp_path):
+    from stem_splitter import weights
+
+    good = b"modello buono"
+    import hashlib
+    monkeypatch.setattr(weights, "FILES", {"m": ["aaaa-bbbb.th"]})
+    monkeypatch.setattr(weights, "SHA256", {"aaaa-bbbb.th": hashlib.sha256(good).hexdigest()})
+    monkeypatch.setattr(weights, "cache_dir", lambda: tmp_path / "hub")
+    return weights, good
+
+
+def test_tampered_model_in_cache_is_replaced(monkeypatch, tmp_path):
+    weights, good = _fake_model_setup(monkeypatch, tmp_path)
+    (tmp_path / "hub").mkdir()
+    (tmp_path / "hub" / "aaaa-bbbb.th").write_bytes(b"pickle con un trojan")
+    downloads = []
+    monkeypatch.setattr(weights, "_download", lambda url, dest: (downloads.append(url), dest.write_bytes(good)))
+    [path] = weights.ensure_model_files("m")
+    assert path.read_bytes() == good and len(downloads) == 1
+
+
+def test_bad_download_is_rejected_and_never_cached(monkeypatch, tmp_path):
+    weights, _ = _fake_model_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(weights, "_download", lambda url, dest: dest.write_bytes(b"file diverso"))
+    with pytest.raises(weights.ModelIntegrityError, match="non corrisponde"):
+        weights.ensure_model_files("m")
+    assert not any((tmp_path / "hub").iterdir())  # né il file né il temporaneo
+
+
+def test_good_cached_model_is_not_downloaded_again(monkeypatch, tmp_path):
+    weights, good = _fake_model_setup(monkeypatch, tmp_path)
+    (tmp_path / "hub").mkdir()
+    (tmp_path / "hub" / "aaaa-bbbb.th").write_bytes(good)
+    monkeypatch.setattr(weights, "_download", lambda *a: (_ for _ in ()).throw(AssertionError("download inutile")))
+    assert weights.ensure_model_files("m")[0].read_bytes() == good
+
+
+def test_pinned_hashes_cover_every_model_and_match_names():
+    from stem_splitter import weights
+    from stem_splitter.separator import QUALITIES, STEM_OPTIONS
+
+    used = {q.plan(six)[0] for q in QUALITIES.values() for six in (False, True)}
+    assert used <= set(weights.FILES)
+    for files in weights.FILES.values():
+        for f in files:
+            assert weights.SHA256[f].startswith(f.split("-")[1].split(".")[0])  # prefisso ufficiale
+            assert len(weights.SHA256[f]) == 64
+
+
+def test_media_file_cannot_make_ffmpeg_use_the_network(tmp_path, monkeypatch):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    hits = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    port = srv.server_address[1]
+    evil = tmp_path / "canzone.mp3"
+    evil.write_text(f"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhttp://127.0.0.1:{port}/spia.ts\n#EXT-X-ENDLIST\n")
+    with pytest.raises(ValueError):
+        load_audio(evil, SR)
+    srv.shutdown()
+    assert hits == []
+
+
+@pytest.mark.parametrize("name", ["Evil.app", "Strumento.command", "Plugin.bundle"])
+def test_app_bundles_are_never_output_folders_or_opened(tmp_path, monkeypatch, name):
+    from stem_splitter import outputs
+
+    pkg = tmp_path / name
+    pkg.mkdir()
+    r = _app_client(tmp_path).post("/api/settings", json={"output_dir": str(pkg)})
+    assert r.status_code == 400 and "applicazione" in r.json()["detail"]
+    launched = []
+    monkeypatch.setattr(outputs.subprocess, "Popen", lambda *a, **k: launched.append(a))
+    with pytest.raises(RuntimeError, match="non è una cartella normale"):
+        outputs.reveal(pkg)
+    # anche se qualcuno scrivesse a mano il percorso nelle impostazioni
+    outputs.save_settings(output_dir=str(pkg))
+    assert _app_client(tmp_path).post("/api/reveal-output").status_code in (400, 501)
+    assert launched == []

@@ -72,15 +72,17 @@ exe = EXE(
 
 coll = COLLECT(exe, a.binaries, a.datas, name=NAME, upx=False)
 
-# --- Linux: via la tabella dei simboli dalle librerie (circa -85 MB solo per libtorch_cpu) -----
+# --- Linux: via la tabella dei simboli dalle librerie di PyTorch (circa -85 MB) -----------------
 # `strip --strip-unneeded` toglie solo i simboli per il debug: codice (.text), costanti (.rodata),
-# dati e simboli dinamici restano identici byte per byte (verificato su tutte le librerie).
+# dati e simboli dinamici restano identici byte per byte (verificato). SOLO torch/lib: altre
+# librerie (es. l'OpenBLAS di NumPy, riscritta da auditwheel) vengono danneggiate dallo strip di
+# Ubuntu 22.04 ("ELF load command address/offset not page-aligned"); il self-test lo rileva.
 if sys.platform.startswith("linux"):
     import subprocess
 
     stripped = 0
     for lib in (Path(DISTPATH) / NAME).rglob("*.so*"):
-        if lib.is_file() and not lib.is_symlink():
+        if "/torch/lib/" in lib.as_posix() and lib.is_file() and not lib.is_symlink():
             info = subprocess.run(["file", "-b", str(lib)], capture_output=True, text=True).stdout
             if "ELF" in info and "not stripped" in info:
                 subprocess.run(["strip", "--strip-unneeded", str(lib)], check=True)

@@ -38,6 +38,12 @@ Python né altro.
   **Ulteriori informazioni → Esegui comunque**.
 - **Linux:** `chmod +x BananaSplit-*.AppImage` e poi avvialo.
 
+**Verificare che l'installer sia autentico** (consigliato se l'hai ricevuto da qualcun altro):
+- l'impronta del file deve comparire in `SHA256SUMS.txt` nella stessa Release:
+  `shasum -a 256 BananaSplit-*.dmg` (Mac/Linux) oppure `certutil -hashfile BananaSplit-*.exe SHA256` (Windows);
+- ogni installer ha un'attestazione firmata da GitHub che dimostra da quale commit e workflow è stato
+  costruito: `gh attestation verify <file> --repo barbienoodles/stem-splitter`.
+
 L'app apre la pagina nel browser; se è già aperta, la riapre soltanto. Si chiude con il pulsante
 **Chiudi l'app** in alto a destra. I lavori temporanei, le impostazioni e il log stanno in `~/.banana-split`.
 

@@ -76,6 +76,19 @@ def output_dir() -> Path:
     return Path(saved) if saved else default_output_dir()
 
 
+# Cartelle che per macOS sono applicazioni o pacchetti: "aprirle" col Finder AVVIA un programma.
+# Non vanno mai accettate come destinazione né aperte da "Apri cartella".
+PACKAGE_SUFFIXES = {
+    ".app", ".bundle", ".framework", ".plugin", ".pkg", ".mpkg", ".prefpane", ".kext", ".appex",
+    ".workflow", ".action", ".service", ".saver", ".qlgenerator", ".mdimporter", ".xpc",
+    ".command", ".terminal", ".tool",
+}
+
+
+def _is_package(path: Path) -> bool:
+    return path.suffix.lower() in PACKAGE_SUFFIXES
+
+
 def validate_output_dir(value: str) -> Path:
     """Cartella assoluta e scrivibile; viene creata se manca solo l'ultimo livello."""
     if not value or not value.strip():
@@ -85,6 +98,8 @@ def validate_output_dir(value: str) -> Path:
         raise ValueError("Serve un percorso completo, ad esempio /Users/nome/Music.")
     if path.exists() and not path.is_dir():
         raise ValueError("Il percorso indicato è un file, non una cartella.")
+    if _is_package(path):
+        raise ValueError("Questa è un'applicazione o un pacchetto, non una cartella normale: scegline un'altra.")
     if not path.exists():
         if not path.parent.is_dir():
             raise ValueError(f"La cartella {path.parent} non esiste.")
@@ -184,6 +199,9 @@ def pick_folder(initial: Path | None = None) -> Path | None:
 
 def reveal(path: Path) -> None:
     """Apre la cartella nel Finder / Esplora file / file manager."""
+    # solo cartelle vere: niente file, niente applicazioni o pacchetti (che verrebbero avviati)
+    if not path.is_dir() or path.is_symlink() or _is_package(path):
+        raise RuntimeError(f"Non apro questo percorso: non è una cartella normale ({path})")
     if sys.platform == "darwin":
         cmd = ["open", str(path)]
     elif sys.platform == "win32":
