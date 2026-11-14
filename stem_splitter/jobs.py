@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import outputs as out
+from .audio import INPUT_EXTENSIONS
 from .separator import Separator
 
 DEFAULT_TTL_HOURS = float(os.environ.get("STEM_SPLITTER_TTL_HOURS", "24"))
@@ -94,7 +95,10 @@ class JobManager:
         job_id = uuid.uuid4().hex[:12]
         job_dir = self.workdir / job_id
         job_dir.mkdir(parents=True)
-        input_path = job_dir / f"input{Path(filename).suffix.lower() or '.audio'}"
+        # l'estensione si conserva solo per formati audio/video noti: un file chiamato .m3u8 (playlist)
+        # potrebbe far leggere a ffmpeg altri file locali
+        suffix = Path(filename).suffix.lower()
+        input_path = job_dir / f"input{suffix if suffix in INPUT_EXTENSIONS else '.audio'}"
         shutil.move(str(data_path), input_path)
         job = Job(job_id, filename, input_path, job_dir / "stems", stem, quality, fmt,
                   samplerate, bit_depth, midside, dest_dir=dest_dir)

@@ -36,7 +36,12 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     excludes=["tkinter", "matplotlib", "IPython", "tensorboard", "pytest", "torchaudio",
-              "torchvision", "sphn", "dora", "hydra", "submitit", "musdb", "museval"],
+              "torchvision", "sphn", "dora", "hydra", "submitit", "musdb", "museval",
+              # mai importati durante una separazione (tracciato con htdemucs, _ft e _6s): compilatore,
+              # esportazione ONNX e le loro dipendenze. Se servissero, l'app fallirebbe con ImportError
+              # (rilevato dal self-test), non cambierebbe i risultati.
+              "torch._inductor", "torch._dynamo", "torch.onnx", "torch._numpy", "torch._vendor.quack",
+              "torchgen", "functorch", "sympy", "mpmath", "networkx", "jinja2", "fsspec", "setuptools"],
     noarchive=False,
 )
 
@@ -51,7 +56,11 @@ def _unused(dest: str) -> bool:
         return True
     if dest.startswith("torch/bin/"):
         return Path(dest).stem != "torch_shm_manager"
-    return False
+    # librerie di test dentro torch/lib, che nessun'altra libreria usa
+    name = Path(dest).name
+    return dest.startswith("torch/lib/") and name.startswith(
+        ("libtorchbind_test", "libjitbackend_test", "libaoti_custom_ops", "libbackend_with_compiler",
+         "torchbind_test", "jitbackend_test", "aoti_custom_ops", "backend_with_compiler"))
 
 
 a.binaries = [e for e in a.binaries if not _unused(e[0])]

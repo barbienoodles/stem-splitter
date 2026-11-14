@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import multiprocessing
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -47,13 +49,34 @@ def _setup_environment(log_to_file: bool) -> None:
         pass
 
 
-def _probe(port: int) -> bool:
-    """True se su questa porta risponde già Banana Split."""
+def _token_file() -> Path:
+    return app_home() / "token"
+
+
+def _probe(port: int) -> str | None:
+    """Se su questa porta c'è il VERO Banana Split, ritorna un codice monouso per aprirlo.
+
+    Il server deve dimostrare di conoscere la chiave (HMAC su un numero casuale) senza che la
+    chiave gli venga inviata: un altro programma in ascolto su questa porta non può farlo.
+    """
+    from .auth import proof, read_token_file
+
+    token = read_token_file(_token_file())
+    if not token:
+        return None
+    base = f"http://127.0.0.1:{port}"
+    nonce = secrets.token_hex(16)
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/info", timeout=1) as r:
-            return json.load(r).get("app") == APP_ID
+        with urllib.request.urlopen(f"{base}/api/hello?nonce={nonce}", timeout=1) as r:
+            hello = json.load(r)
+        if hello.get("app") != APP_ID or not hmac.compare_digest(str(hello.get("proof")), proof(token, nonce)):
+            return None
+        req = urllib.request.Request(f"{base}/api/launch-code", method="POST",
+                                     headers={"X-Banana-Token": token, "X-Stem-Splitter": "1"})
+        with urllib.request.urlopen(req, timeout=2) as r:
+            return json.load(r).get("code")
     except Exception:
-        return False
+        return None
 
 
 def _free_port(preferred: int) -> int:
@@ -78,20 +101,25 @@ def _make_server(app, port: int):
 
 
 def run(port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
-    if _probe(port):  # già aperta: riapri solo la pagina
+    code = _probe(port)
+    if code:  # già aperta (e verificata): riapri solo la pagina
         print(f"Banana Split è già in esecuzione sulla porta {port}")
         if open_browser:
-            webbrowser.open(f"http://127.0.0.1:{port}/")
+            webbrowser.open(f"http://127.0.0.1:{port}/?c={code}")
         return
 
+    from .auth import new_token, write_token_file
     from .separator import Separator
     from .server import create_app
 
-    port = _free_port(port)
+    port = _free_port(port)  # se la porta è occupata da altro, se ne usa un'altra
     sep = Separator()
     print(f"Dispositivo: {sep.info.label}")
+    token = new_token()
+    write_token_file(_token_file(), token)
     server_box: dict = {}
-    app = create_app(sep, on_shutdown=lambda: setattr(server_box["server"], "should_exit", True))
+    app = create_app(sep, on_shutdown=lambda: setattr(server_box["server"], "should_exit", True),
+                     token=token)
     server = server_box["server"] = _make_server(app, port)
     url = f"http://127.0.0.1:{port}/"
 
@@ -100,7 +128,7 @@ def run(port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
             if server.started:
                 print(f"Pronto su {url}")
                 if open_browser:
-                    webbrowser.open(url)
+                    webbrowser.open(f"{url}?c={app.state.auth.new_code()}")
                 return
             time.sleep(0.05)
 
@@ -145,8 +173,12 @@ def self_test() -> int:
 
         port = _free_port(DEFAULT_PORT + 100)
         box: dict = {}
-        server = box["s"] = _make_server(
-            create_app(sep, tmp / "jobs", on_shutdown=lambda: setattr(box["s"], "should_exit", True)), port)
+        from .auth import new_token, proof
+
+        token = new_token()
+        app = create_app(sep, tmp / "jobs", on_shutdown=lambda: setattr(box["s"], "should_exit", True),
+                         token=token)
+        server = box["s"] = _make_server(app, port)
         th = threading.Thread(target=server.run, daemon=True)
         th.start()
         for _ in range(200):
@@ -154,17 +186,31 @@ def self_test() -> int:
                 break
             time.sleep(0.05)
         base = f"http://127.0.0.1:{port}"
-        with urllib.request.urlopen(base + "/api/info", timeout=5) as r:
+        key = {"X-Banana-Token": token}
+        # senza chiave: rifiutato
+        try:
+            urllib.request.urlopen(base + "/api/info", timeout=5)
+            raise AssertionError("l'API risponde senza chiave")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401, exc.code
+        # prova d'identità senza rivelare la chiave
+        with urllib.request.urlopen(base + "/api/hello?nonce=abc", timeout=5) as r:
+            assert json.load(r)["proof"] == proof(token, "abc")
+        # codice monouso: la prima volta dà il cookie, la seconda no
+        code = app.state.auth.new_code()
+        opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler())
+        with opener.open(base + f"/?c={code}", timeout=5) as r:
+            assert b"Banana Split" in r.read()
+        assert not app.state.auth.consume(code)
+        with urllib.request.urlopen(urllib.request.Request(base + "/api/info", headers=key), timeout=5) as r:
             info = json.load(r)
         assert info["app"] == APP_ID and info["can_shutdown"], info
-        with urllib.request.urlopen(base + "/", timeout=5) as r:
-            assert b"Banana Split" in r.read()
         req = urllib.request.Request(base + "/api/shutdown", method="POST",
-                                     headers={"X-Stem-Splitter": "1"})
+                                     headers={"X-Stem-Splitter": "1", **key})
         urllib.request.urlopen(req, timeout=5).read()
         th.join(10)
         assert not th.is_alive(), "il server non si è chiuso"
-        print("server: ok")
+        print("server e chiave d'accesso: ok")
     print("SELF-TEST OK")
     return 0
 

@@ -33,6 +33,8 @@ def app_home() -> Path:
     home = os.environ.get("BANANA_SPLIT_HOME") or os.environ.get("STEM_SPLITTER_HOME")
     path = Path(home) if home else Path.home() / ".banana-split"
     path.mkdir(parents=True, exist_ok=True)
+    if not home and os.name == "posix":
+        os.chmod(path, 0o700)  # brani, stem, log e chiave d'accesso: solo per questo utente
     return path
 
 
@@ -86,7 +88,18 @@ PACKAGE_SUFFIXES = {
 
 
 def _is_package(path: Path) -> bool:
-    return path.suffix.lower() in PACKAGE_SUFFIXES
+    """Applicazione o pacchetto macOS: per estensione o per struttura (Contents/Info.plist)."""
+    return (path.suffix.lower() in PACKAGE_SUFFIXES
+            or (path / "Contents" / "Info.plist").exists() or (path / "Contents" / "MacOS").exists())
+
+
+# programmi di sistema col percorso completo: niente omonimi trovati nel PATH o nella cartella corrente
+OPEN_MAC = "/usr/bin/open"
+OSASCRIPT = "/usr/bin/osascript"
+
+
+def _windows_exe(*parts: str) -> str:
+    return str(Path(os.environ.get("SystemRoot", r"C:\Windows"), *parts))
 
 
 def validate_output_dir(value: str) -> Path:
@@ -98,7 +111,8 @@ def validate_output_dir(value: str) -> Path:
         raise ValueError("Serve un percorso completo, ad esempio /Users/nome/Music.")
     if path.exists() and not path.is_dir():
         raise ValueError("Il percorso indicato è un file, non una cartella.")
-    if _is_package(path):
+    path = Path(os.path.realpath(path)) if path.exists() else path
+    if _is_package(path) or any(_is_package(p) for p in path.parents):
         raise ValueError("Questa è un'applicazione o un pacchetto, non una cartella normale: scegline un'altra.")
     if not path.exists():
         if not path.parent.is_dir():
@@ -142,7 +156,7 @@ class PickerUnavailable(RuntimeError):
 
 
 def _picker_command(initial: Path) -> tuple[list[str], dict] | None:
-    if sys.platform == "darwin" and shutil.which("osascript"):
+    if sys.platform == "darwin" and Path(OSASCRIPT).exists():
         # "activate" porta in primo piano la finestra di osascript stesso: nessun permesso
         # di automazione su altre app. Il percorso iniziale passa come argomento, non nel codice.
         script = [
@@ -153,12 +167,13 @@ def _picker_command(initial: Path) -> tuple[list[str], dict] | None:
             "return POSIX path of f",
             "end run",
         ]
-        cmd = ["osascript"]
+        cmd = [OSASCRIPT]
         for line in script:
             cmd += ["-e", line]
         return cmd + [str(initial)], {}
     if sys.platform == "win32":
-        exe = shutil.which("powershell") or shutil.which("pwsh")
+        ps = Path(_windows_exe("System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
+        exe = str(ps) if ps.exists() else None
         if exe:
             ps = (
                 "Add-Type -AssemblyName System.Windows.Forms;"
@@ -199,15 +214,19 @@ def pick_folder(initial: Path | None = None) -> Path | None:
 
 def reveal(path: Path) -> None:
     """Apre la cartella nel Finder / Esplora file / file manager."""
-    # solo cartelle vere: niente file, niente applicazioni o pacchetti (che verrebbero avviati)
-    if not path.is_dir() or path.is_symlink() or _is_package(path):
+    # solo cartelle vere dell'utente: niente file, niente applicazioni o pacchetti (verrebbero avviati);
+    # i link simbolici si risolvono e si controlla la destinazione reale
+    real = path.resolve()
+    if not real.is_dir() or _is_package(real) or any(_is_package(p) for p in real.parents):
         raise RuntimeError(f"Non apro questo percorso: non è una cartella normale ({path})")
+    if hasattr(os, "getuid") and real.stat().st_uid != os.getuid():
+        raise RuntimeError(f"Non apro questo percorso: la cartella non è tua ({path})")
     if sys.platform == "darwin":
-        cmd = ["open", str(path)]
+        cmd = [OPEN_MAC, str(real)]
     elif sys.platform == "win32":
-        cmd = ["explorer", str(path)]
+        cmd = [_windows_exe("explorer.exe"), str(real)]
     else:
-        cmd = ["xdg-open", str(path)]
+        cmd = [shutil.which("xdg-open") or "xdg-open", str(real)]
     try:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:  # es. Linux senza xdg-open

@@ -17,6 +17,7 @@ from . import __version__
 from . import outputs as out
 from .outputs import safe_name
 from .audio import BIT_DEPTHS, FORMATS, INPUT_EXTENSIONS, MP3_MAX_RATE, SAMPLE_RATES, validate_output
+from .auth import AuthMiddleware, LocalAuth, proof
 from .jobs import JobManager
 from .separator import DEFAULT_STEM, MIDSIDE_MODES, QUALITIES, STEM_OPTIONS, Separator
 
@@ -79,12 +80,31 @@ def create_app(
     workdir: Path | None = None,
     on_shutdown=None,
     allowed_hosts=LOCAL_HOSTS,
+    token: str | None = None,
 ) -> FastAPI:
     separator = separator or Separator()
     manager = JobManager(separator, workdir or default_workdir())
     app = FastAPI(title="Stem Splitter", version=__version__)
     app.state.manager = manager
+    # chiave d'accesso per avvio (vedi auth.py); senza token l'app resta aperta, come nei test
+    app.state.auth = LocalAuth(token) if token else None
+    if app.state.auth:
+        app.add_middleware(AuthMiddleware, auth=app.state.auth)
+    # aggiunto per ultimo = eseguito per primo: l'Host si controlla prima di tutto
     app.add_middleware(HostCheckMiddleware, allowed_hosts=allowed_hosts)
+
+    @app.get("/api/hello")
+    def hello(nonce: str = ""):
+        """Senza chiave: dice solo chi è, e lo dimostra (HMAC) a chi conosce già la chiave."""
+        auth = app.state.auth
+        return {"app": APP_ID, "proof": proof(auth.token, nonce) if (auth and nonce) else None}
+
+    @app.post("/api/launch-code", dependencies=[Depends(require_app_header)])
+    def launch_code():
+        """Nuovo codice monouso per aprire la pagina (lo chiede un secondo avvio dell'app)."""
+        if not app.state.auth:
+            raise HTTPException(404, "Non disponibile")
+        return {"code": app.state.auth.new_code()}
 
     @app.get("/api/info")
     def info():

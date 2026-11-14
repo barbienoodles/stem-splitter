@@ -46,11 +46,15 @@ jobs:
             os: macos-15
             kind: mac
             arch: AppleSilicon
+            # lzma: comprime molto meglio gli shader Metal di PyTorch; si apre da macOS 10.15 (qui serve 11)
+            dmg_format: ULMO
             torch: torch
           - name: macOS Intel
             os: macos-15-intel
             kind: mac
             arch: Intel
+            # lzfse: si apre da macOS 10.11, quindi anche su High Sierra 10.13
+            dmg_format: ULFO
             # ultima PyTorch per Mac Intel, compilata per NumPy 1.x
             torch: torch==2.2.2 "numpy<2"
             # Python ufficiale di python.org: funziona da macOS 10.13 High Sierra
@@ -95,6 +99,8 @@ jobs:
         id: ver
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.2.1"; fi
+          # il nome del tag finisce negli script: solo caratteri innocui
+          [[ "$v" =~ ^[0-9A-Za-z.+-]+$ ]] || { echo "versione non valida: $v"; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Dipendenze
@@ -127,7 +133,7 @@ jobs:
           cp -R "dist/Banana Split.app" dmg/
           ln -s /Applications dmg/Applications
           out="dist/BananaSplit-${{ steps.ver.outputs.version }}-macOS-${{ matrix.arch }}.dmg"
-          hdiutil create -volname "Banana Split" -srcfolder dmg -ov -format UDZO "$out"
+          hdiutil create -volname "Banana Split" -srcfolder dmg -ov -format ${{ matrix.dmg_format }} "$out"
           # verifica: monta il DMG ed esegue il self-test dall'app contenuta
           # punto di montaggio fisso: l'output di hdiutil non ha sempre lo stesso formato
           mnt="$RUNNER_TEMP/dmg-mount"
