@@ -121,6 +121,10 @@ class Separator:
                     "Demucs non è installato. Esegui ./scripts/install.sh oppure "
                     "`pip install --no-deps demucs`."
                 ) from exc
+            from .weights import ensure_model_files
+
+            # verifica l'impronta completa dei file prima che demucs li carichi (pickle)
+            ensure_model_files(name)
             model = get_model(name)
             model.eval()
             self._models[name] = model

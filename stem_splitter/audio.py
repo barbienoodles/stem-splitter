@@ -1,7 +1,8 @@
 """Decodifica/codifica audio tramite ffmpeg.
 
 Usa l'ffmpeg incluso in imageio-ffmpeg (binari per macOS Intel, macOS Apple Silicon,
-Linux e Windows, compilati con libsoxr e libmp3lame), così non serve installare nulla
+Linux e Windows, tutti con libmp3lame; libsoxr c'è solo nelle build Linux e macOS Intel: altrove
+si usa il ricampionatore standard di ffmpeg, vedi has_soxr), così non serve installare nulla
 a parte; se manca, ripiega sull'ffmpeg di sistema.
 
 In ingresso accetta qualsiasi file che ffmpeg sappia leggere: MP3, WAV, AAC, M4A/ALAC,
@@ -64,9 +65,14 @@ def _resample_filter(rate: int) -> list[str]:
     return ["-af", f"aresample={rate}:filter_size=64:cutoff=0.97"]
 
 
+# Solo file locali e pipe: un file "audio" costruito apposta (es. una playlist HLS) non può far
+# aprire connessioni di rete a ffmpeg, qualunque sia la versione di ffmpeg in uso.
+SAFE_INPUT = ["-protocol_whitelist", "file,pipe"]
+
+
 def probe_samplerate(path: str | Path) -> int | None:
     """Frequenza di campionamento originale del file (None se non determinabile)."""
-    proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", "-i", str(path)],
+    proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", *SAFE_INPUT, "-i", str(path)],
                           capture_output=True, text=True)
     m = re.search(r"Audio:.*?(\d{4,6}) Hz", proc.stderr)
     return int(m.group(1)) if m else None
@@ -75,7 +81,7 @@ def probe_samplerate(path: str | Path) -> int | None:
 def load_audio(path: str | Path, samplerate: int, channels: int = 2) -> np.ndarray:
     """Legge un file audio/video e ritorna float32 [channels, samples] alla frequenza richiesta."""
     cmd = [
-        ffmpeg_exe(), "-nostdin", "-v", "error", "-i", str(path),
+        ffmpeg_exe(), "-nostdin", "-v", "error", *SAFE_INPUT, "-i", str(path),
         "-map", "0:a:0", "-vn", *_resample_filter(samplerate),
         "-f", "f32le", "-acodec", "pcm_f32le", "-ac", str(channels), "-",
     ]

@@ -36,9 +36,39 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     excludes=["tkinter", "matplotlib", "IPython", "tensorboard", "pytest", "torchaudio",
-              "torchvision", "sphn", "dora", "hydra", "submitit", "musdb", "museval"],
+              "torchvision", "sphn", "dora", "hydra", "submitit", "musdb", "museval",
+              # mai importati durante una separazione (verificato con sys.modules dopo il self-test e una
+              # separazione reale): compilatore, esportazione ONNX e le loro dipendenze. Se servissero,
+              # l'app fallirebbe con ImportError (lo rileva il self-test), non cambierebbe i risultati.
+              # NON escludere torchgen: `import torch` lo carica (torch.nn.modules.module).
+              "torch._inductor", "torch._dynamo", "torch.onnx", "torch._numpy", "torch._vendor.quack",
+              "functorch", "sympy", "mpmath", "networkx", "jinja2", "fsspec", "setuptools",
+              "pkg_resources", "filelock", "torch.utils.benchmark",
+              "xmlrpc", "pydoc_data", "readline", "sqlite3"],
     noarchive=False,
 )
+
+
+# --- file di PyTorch che l'app non usa mai --------------------------------------------------
+# Verificato tracciando i file aperti dall'app durante una separazione (strace): torch/test
+# (programmi di test C++) e torch/bin non vengono mai letti né eseguiti, TRANNE
+# torch/bin/torch_shm_manager, che PyTorch controlla all'avvio (senza, si rifiuta di partire).
+def _unused(dest: str) -> bool:
+    dest = dest.replace("\\", "/")
+    if dest.startswith("torch/test/"):
+        return True
+    if dest.startswith("torch/bin/"):
+        return Path(dest).stem != "torch_shm_manager"
+    # librerie di test dentro torch/lib, che nessun'altra libreria usa
+    name = Path(dest).name
+    return dest.startswith("torch/lib/") and name.startswith(
+        ("libtorchbind_test", "libjitbackend_test", "libaoti_custom_ops", "libbackend_with_compiler",
+         "torchbind_test", "jitbackend_test", "aoti_custom_ops", "backend_with_compiler"))
+
+
+a.binaries = [e for e in a.binaries if not _unused(e[0])]
+a.datas = [e for e in a.datas if not _unused(e[0])]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -53,6 +83,23 @@ exe = EXE(
 )
 
 coll = COLLECT(exe, a.binaries, a.datas, name=NAME, upx=False)
+
+# --- Linux: via la tabella dei simboli dalle librerie di PyTorch (circa -85 MB) -----------------
+# `strip --strip-unneeded` toglie solo i simboli per il debug: codice (.text), costanti (.rodata),
+# dati e simboli dinamici restano identici byte per byte (verificato). SOLO torch/lib: altre
+# librerie (es. l'OpenBLAS di NumPy, riscritta da auditwheel) vengono danneggiate dallo strip di
+# Ubuntu 22.04 ("ELF load command address/offset not page-aligned"); il self-test lo rileva.
+if sys.platform.startswith("linux"):
+    import subprocess
+
+    stripped = 0
+    for lib in (Path(DISTPATH) / NAME).rglob("*.so*"):
+        if "/torch/lib/" in lib.as_posix() and lib.is_file() and not lib.is_symlink():
+            info = subprocess.run(["file", "-b", str(lib)], capture_output=True, text=True).stdout
+            if "ELF" in info and "not stripped" in info:
+                subprocess.run(["strip", "--strip-unneeded", str(lib)], check=True)
+                stripped += 1
+    print(f"strip: {stripped} librerie alleggerite")
 
 if sys.platform == "darwin":
     app = BUNDLE(

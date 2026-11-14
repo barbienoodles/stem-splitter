@@ -33,6 +33,11 @@ jobs:
   build:
     name: ${{ matrix.name }}
     needs: tests
+    permissions:
+      contents: read
+      # solo per l'attestazione di provenienza (usata nelle build delle Release)
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -41,11 +46,15 @@ jobs:
             os: macos-15
             kind: mac
             arch: AppleSilicon
+            # lzma: comprime molto meglio gli shader Metal di PyTorch; si apre da macOS 10.15 (qui serve 11)
+            dmg_format: ULMO
             torch: torch
           - name: macOS Intel
             os: macos-15-intel
             kind: mac
             arch: Intel
+            # lzfse: si apre da macOS 10.11, quindi anche su High Sierra 10.13
+            dmg_format: ULFO
             # ultima PyTorch per Mac Intel, compilata per NumPy 1.x
             torch: torch==2.2.2 "numpy<2"
             # Python ufficiale di python.org: funziona da macOS 10.13 High Sierra
@@ -90,6 +99,8 @@ jobs:
         id: ver
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.2.1"; fi
+          # il nome del tag finisce negli script: solo caratteri innocui
+          [[ "$v" =~ ^[0-9A-Za-z.+-]+$ ]] || { echo "versione non valida: $v"; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Dipendenze
@@ -102,6 +113,10 @@ jobs:
           python -c "import torch, numpy; print('torch', torch.__version__, 'numpy', numpy.__version__)"
 
       - name: PyInstaller
+        env:
+          # archivio Python non compresso: lo comprime meglio il pacchetto finale (zstd/lzma/lzma2);
+          # sul Mac Intel (lzfse) si lascia il default. Stesso bytecode, stessi risultati.
+          PYINSTALLER_ZLIB_COMPRESSION_LEVEL: ${{ matrix.arch == 'Intel' && '6' || '0' }}
         run: pyinstaller --noconfirm --clean packaging/stem_splitter.spec
 
       # ---------- macOS ----------
@@ -122,7 +137,7 @@ jobs:
           cp -R "dist/Banana Split.app" dmg/
           ln -s /Applications dmg/Applications
           out="dist/BananaSplit-${{ steps.ver.outputs.version }}-macOS-${{ matrix.arch }}.dmg"
-          hdiutil create -volname "Banana Split" -srcfolder dmg -ov -format UDZO "$out"
+          hdiutil create -volname "Banana Split" -srcfolder dmg -ov -format ${{ matrix.dmg_format }} "$out"
           # verifica: monta il DMG ed esegue il self-test dall'app contenuta
           # punto di montaggio fisso: l'output di hdiutil non ha sempre lo stesso formato
           mnt="$RUNNER_TEMP/dmg-mount"
@@ -175,9 +190,24 @@ jobs:
           echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool" | sha256sum -c -
           chmod +x appimagetool
           out="dist/BananaSplit-${{ steps.ver.outputs.version }}-Linux-x86_64.AppImage"
-          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool $app "$out"
+          # runtime dell'AppImage incluso nel repository (AppImage/type2-runtime, verificato) invece
+          # di scaricarlo senza controllo; zstd livello 19 a blocchi da 1 MB (il runtime legge solo zstd/gzip)
+          echo "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46  packaging/linux/runtime-x86_64" | sha256sum -c -
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --runtime-file packaging/linux/runtime-x86_64 \
+            --mksquashfs-opt -Xcompression-level --mksquashfs-opt 19 \
+            --mksquashfs-opt -b --mksquashfs-opt 1M \
+            $app "$out"
           APPIMAGE_EXTRACT_AND_RUN=1 "$out" --self-test
           ls -lh "$out"
+
+      # Attestazione firmata da GitHub: certifica che l'installer è stato costruito da questo
+      # repository, da questo commit, con questo workflow. Chi lo scarica può verificarlo con
+      # `gh attestation verify <file> --repo barbienoodles/stem-splitter`.
+      - name: Attestazione di provenienza
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: ${{ matrix.kind == 'mac' && 'dist/*.dmg' || (matrix.kind == 'windows' && 'dist/*-Setup.exe' || 'dist/*.AppImage') }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -205,6 +235,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # impronte SHA-256 di tutti gli installer, pubblicate insieme a loro
+          (cd out && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
           ls -lh out
           # la Release può essere già stata creata dal sito di GitHub (che crea anche il tag):
           # in quel caso si aggiungono solo gli installer

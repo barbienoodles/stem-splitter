@@ -16,23 +16,24 @@ from .separator import DEFAULT_STEM, MIDSIDE_MODES, QUALITIES, STEM_OPTIONS
 def _serve(args) -> None:
     import uvicorn
 
+    from .auth import new_token
     from .separator import Separator
-    from .server import create_app
-
-    from .server import LOCAL_HOSTS
+    from .server import LOCAL_HOSTS, create_app
 
     sep = Separator(args.device)
     print(f"Dispositivo: {sep.info.label}")
     hosts = list(LOCAL_HOSTS)
     if args.host in ("0.0.0.0", "::"):
-        print("⚠️  In ascolto su tutte le interfacce: chiunque sulla tua rete può usare Banana Split "
-              "(non c'è autenticazione).")
         hosts = ["*"]
     elif args.host not in LOCAL_HOSTS:
         hosts.append(args.host)
-    app = create_app(sep, allowed_hosts=hosts)
-    url = f"http://{'localhost' if args.host in ('0.0.0.0', '127.0.0.1') else args.host}:{args.port}"
-    print(f"Apri {url} nel browser")
+    if args.host not in LOCAL_HOSTS:
+        print("⚠️  Banana Split sarà raggiungibile da altri dispositivi della rete. Serve il link con il "
+              "codice qui sotto, ma il traffico è HTTP non cifrato: usalo solo su reti di cui ti fidi.")
+    app = create_app(sep, allowed_hosts=hosts, token=new_token())
+    host = "127.0.0.1" if args.host in ("0.0.0.0", "::", "localhost") else args.host
+    url = f"http://{host}:{args.port}/?c={app.state.auth.new_code()}"
+    print(f"Apri questo link (valido una volta, per 2 minuti): {url}")
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

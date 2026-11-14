@@ -582,9 +582,10 @@ def test_picker_commands_by_platform(monkeypatch, tmp_path):
 
     tricky = tmp_path / 'cartella "strana" $(rm -rf)'
     monkeypatch.setattr(outputs.sys, "platform", "darwin")
-    monkeypatch.setattr(outputs.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(outputs, "OSASCRIPT", "/bin/sh")  # un file che esiste, al posto di osascript
+    monkeypatch.setattr(outputs, "_windows_exe", lambda *parts: "/bin/sh")
     cmd, _ = outputs._picker_command(tricky)
-    assert cmd[0] == "osascript" and cmd[-1] == str(tricky)
+    assert cmd[0] == "/bin/sh" and cmd[-1] == str(tricky)
     assert all(str(tricky) not in part for part in cmd[:-1])
     monkeypatch.setattr(outputs.sys, "platform", "win32")
     cmd, extra = outputs._picker_command(tricky)
@@ -624,3 +625,214 @@ def test_reveal_without_file_manager_is_a_clean_error(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="aprire la cartella"):
         outputs.reveal(tmp_path)
     assert _app_client(tmp_path).post("/api/reveal-output").status_code == 501
+
+
+# --- sicurezza: niente codice eseguito da file manomessi -------------------------------
+
+
+def _fake_model_setup(monkeypatch, tmp_path):
+    from stem_splitter import weights
+
+    good = b"modello buono"
+    import hashlib
+    monkeypatch.setattr(weights, "FILES", {"m": ["aaaa-bbbb.th"]})
+    monkeypatch.setattr(weights, "SHA256", {"aaaa-bbbb.th": hashlib.sha256(good).hexdigest()})
+    monkeypatch.setattr(weights, "cache_dir", lambda: tmp_path / "hub")
+    return weights, good
+
+
+def test_tampered_model_in_cache_is_replaced(monkeypatch, tmp_path):
+    weights, good = _fake_model_setup(monkeypatch, tmp_path)
+    (tmp_path / "hub").mkdir()
+    (tmp_path / "hub" / "aaaa-bbbb.th").write_bytes(b"pickle con un trojan")
+    downloads = []
+    monkeypatch.setattr(weights, "_download", lambda url, dest: (downloads.append(url), dest.write_bytes(good)))
+    [path] = weights.ensure_model_files("m")
+    assert path.read_bytes() == good and len(downloads) == 1
+
+
+def test_bad_download_is_rejected_and_never_cached(monkeypatch, tmp_path):
+    weights, _ = _fake_model_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(weights, "_download", lambda url, dest: dest.write_bytes(b"file diverso"))
+    with pytest.raises(weights.ModelIntegrityError, match="non corrisponde"):
+        weights.ensure_model_files("m")
+    assert not any((tmp_path / "hub").iterdir())  # né il file né il temporaneo
+
+
+def test_good_cached_model_is_not_downloaded_again(monkeypatch, tmp_path):
+    weights, good = _fake_model_setup(monkeypatch, tmp_path)
+    (tmp_path / "hub").mkdir()
+    (tmp_path / "hub" / "aaaa-bbbb.th").write_bytes(good)
+    monkeypatch.setattr(weights, "_download", lambda *a: (_ for _ in ()).throw(AssertionError("download inutile")))
+    assert weights.ensure_model_files("m")[0].read_bytes() == good
+
+
+def test_pinned_hashes_cover_every_model_and_match_names():
+    from stem_splitter import weights
+    from stem_splitter.separator import QUALITIES, STEM_OPTIONS
+
+    used = {q.plan(six)[0] for q in QUALITIES.values() for six in (False, True)}
+    assert used <= set(weights.FILES)
+    for files in weights.FILES.values():
+        for f in files:
+            assert weights.SHA256[f].startswith(f.split("-")[1].split(".")[0])  # prefisso ufficiale
+            assert len(weights.SHA256[f]) == 64
+
+
+def test_media_file_cannot_make_ffmpeg_use_the_network(tmp_path, monkeypatch):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    hits = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    port = srv.server_address[1]
+    evil = tmp_path / "canzone.mp3"
+    evil.write_text(f"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhttp://127.0.0.1:{port}/spia.ts\n#EXT-X-ENDLIST\n")
+    with pytest.raises(ValueError):
+        load_audio(evil, SR)
+    srv.shutdown()
+    assert hits == []
+
+
+@pytest.mark.parametrize("name", ["Evil.app", "Strumento.command", "Plugin.bundle"])
+def test_app_bundles_are_never_output_folders_or_opened(tmp_path, monkeypatch, name):
+    from stem_splitter import outputs
+
+    pkg = tmp_path / name
+    pkg.mkdir()
+    r = _app_client(tmp_path).post("/api/settings", json={"output_dir": str(pkg)})
+    assert r.status_code == 400 and "applicazione" in r.json()["detail"]
+    launched = []
+    monkeypatch.setattr(outputs.subprocess, "Popen", lambda *a, **k: launched.append(a))
+    with pytest.raises(RuntimeError, match="non è una cartella normale"):
+        outputs.reveal(pkg)
+    # anche se qualcuno scrivesse a mano il percorso nelle impostazioni
+    outputs.save_settings(output_dir=str(pkg))
+    assert _app_client(tmp_path).post("/api/reveal-output").status_code in (400, 501)
+    assert launched == []
+
+
+# --- chiave d'accesso locale ------------------------------------------------------------
+
+
+def _auth_app(tmp_path, token="segreto-di-prova"):
+    from stem_splitter.server import create_app
+
+    return create_app(FakeSeparator("cpu"), tmp_path / "jobs", on_shutdown=lambda: None, token=token)
+
+
+def test_api_requires_the_launch_key(tmp_path):
+    app = _auth_app(tmp_path)
+    c = _local_client(app, headers={"X-Stem-Splitter": "1"})
+    for method, path in [("get", "/api/info"), ("get", "/api/jobs"), ("get", "/api/settings"),
+                         ("post", "/api/shutdown"), ("post", "/api/reveal-output"), ("post", "/api/launch-code")]:
+        assert getattr(c, method)(path).status_code == 401, path
+    assert c.get("/api/info", headers={"X-Banana-Token": "sbagliato"}).status_code == 401
+    assert c.get("/api/info", headers={"X-Banana-Token": "segreto-di-prova"}).status_code == 200
+
+
+def test_one_time_code_gives_cookie_once(tmp_path):
+    app = _auth_app(tmp_path)
+    c = _local_client(app)
+    code = app.state.auth.new_code()
+    r = c.get(f"/?c={code}", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    cookie = r.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+    assert c.get("/api/info").status_code == 200  # il client ora ha il cookie
+    other = _local_client(app)
+    assert other.get(f"/?c={code}", follow_redirects=False).status_code == 200  # codice già usato: niente cookie
+    assert "set-cookie" not in other.get(f"/?c={code}", follow_redirects=False).headers
+    assert other.get("/api/info").status_code == 401
+
+
+def test_hello_proves_identity_without_revealing_key(tmp_path):
+    from stem_splitter.auth import proof
+
+    c = _local_client(_auth_app(tmp_path))
+    r = c.get("/api/hello?nonce=n123").json()
+    assert r["proof"] == proof("segreto-di-prova", "n123") and "segreto-di-prova" not in str(r)
+
+
+def test_launcher_does_not_trust_an_impostor_server(tmp_path, monkeypatch):
+    """Un programma qualsiasi sulla porta 8765 che si spaccia per Banana Split non viene creduto."""
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from stem_splitter import app as launcher
+    from stem_splitter.auth import write_token_file
+
+    seen_tokens = []
+
+    class Impostor(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen_tokens.append(self.headers.get("X-Banana-Token"))
+            body = _json.dumps({"app": "banana-split", "proof": "inventata"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_POST = do_GET
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), Impostor)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    write_token_file(launcher._token_file(), "chiave-vera")
+    assert launcher._probe(srv.server_address[1]) is None
+    srv.shutdown()
+    assert seen_tokens == [None]  # la chiave non è mai stata inviata all'impostore
+
+
+def test_token_file_is_private(tmp_path):
+    import stat
+
+    from stem_splitter.auth import read_token_file, write_token_file
+
+    f = tmp_path / "token"
+    write_token_file(f, "abc")
+    assert read_token_file(f) == "abc" and stat.S_IMODE(f.stat().st_mode) == 0o600
+
+
+def test_folder_with_app_structure_is_refused(tmp_path):
+    from stem_splitter import outputs
+
+    fake_app = tmp_path / "Cartella innocua"
+    (fake_app / "Contents" / "MacOS").mkdir(parents=True)
+    with pytest.raises(ValueError, match="applicazione"):
+        outputs.validate_output_dir(str(fake_app))
+    with pytest.raises(RuntimeError, match="non è una cartella normale"):
+        outputs.reveal(fake_app)
+    link = tmp_path / "link-normale"
+    link.symlink_to(fake_app)
+    with pytest.raises(RuntimeError, match="non è una cartella normale"):
+        outputs.reveal(link)
+
+
+def test_unknown_upload_extensions_are_neutralised(song, tmp_path):
+    from stem_splitter.jobs import JobManager
+
+    m = JobManager(FakeSeparator("cpu"), tmp_path / "jobs")
+    for name, expected in [("brano.mp3", ".mp3"), ("Video.MOV", ".mov"), ("lista.m3u8", ".audio"), ("x.sh", ".audio")]:
+        src = tmp_path / f"up-{name}"
+        src.write_bytes(song.read_bytes())
+        job = m.submit(name, src, "vocals", "standard", "wav")
+        assert job.input_path.suffix == expected, name
+        m.delete(job.id)
