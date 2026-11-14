@@ -19,9 +19,9 @@ OutputDir=..\..\dist
 OutputBaseFilename=BananaSplit-{#AppVersion}-Windows-Setup
 SetupIconFile=..\icon.ico
 UninstallDisplayIcon={app}\BananaSplit.exe
-Compression=lzma2/ultra64
-LZMADictionarySize=262144
-LZMANumFastBytes=273
+; lzma2/max: con dizionari più grandi (ultra64 + 256 MB) il compilatore a 32 bit esaurisce la memoria
+; (LZMA_Encode code 5) per un guadagno stimato di 1-4 MB
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
