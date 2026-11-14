@@ -39,6 +39,24 @@ a = Analysis(
               "torchvision", "sphn", "dora", "hydra", "submitit", "musdb", "museval"],
     noarchive=False,
 )
+
+
+# --- file di PyTorch che l'app non usa mai --------------------------------------------------
+# Verificato tracciando i file aperti dall'app durante una separazione (strace): torch/test
+# (programmi di test C++) e torch/bin non vengono mai letti né eseguiti, TRANNE
+# torch/bin/torch_shm_manager, che PyTorch controlla all'avvio (senza, si rifiuta di partire).
+def _unused(dest: str) -> bool:
+    dest = dest.replace("\\", "/")
+    if dest.startswith("torch/test/"):
+        return True
+    if dest.startswith("torch/bin/"):
+        return Path(dest).stem != "torch_shm_manager"
+    return False
+
+
+a.binaries = [e for e in a.binaries if not _unused(e[0])]
+a.datas = [e for e in a.datas if not _unused(e[0])]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -53,6 +71,21 @@ exe = EXE(
 )
 
 coll = COLLECT(exe, a.binaries, a.datas, name=NAME, upx=False)
+
+# --- Linux: via la tabella dei simboli dalle librerie (circa -85 MB solo per libtorch_cpu) -----
+# `strip --strip-unneeded` toglie solo i simboli per il debug: codice (.text), costanti (.rodata),
+# dati e simboli dinamici restano identici byte per byte (verificato su tutte le librerie).
+if sys.platform.startswith("linux"):
+    import subprocess
+
+    stripped = 0
+    for lib in (Path(DISTPATH) / NAME).rglob("*.so*"):
+        if lib.is_file() and not lib.is_symlink():
+            info = subprocess.run(["file", "-b", str(lib)], capture_output=True, text=True).stdout
+            if "ELF" in info and "not stripped" in info:
+                subprocess.run(["strip", "--strip-unneeded", str(lib)], check=True)
+                stripped += 1
+    print(f"strip: {stripped} librerie alleggerite")
 
 if sys.platform == "darwin":
     app = BUNDLE(
