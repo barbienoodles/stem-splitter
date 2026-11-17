@@ -6,6 +6,8 @@ ma **in locale sul tuo computer**: nessun upload su server esterni, nessun limit
 Una scimmietta prende il brano, separa le banane (le mangia) dalle noccioline (le lancia via),
 mangia l'ultima banana, fa una scorreggia e… DONE! Gli stem finiscono nella cartella che scegli tu.
 
+💛 **Ti è utile?** [Sostieni il progetto con PayPal](https://www.paypal.com/qrcodes/p2pqrc/RURWTWAVGV2CL)
+
 *(Fino alla versione 0.1.x si chiamava "Stem Splitter".)*
 
 Funziona su:
