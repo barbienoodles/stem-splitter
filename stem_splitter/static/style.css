@@ -188,3 +188,9 @@ canvas.wave { width: 100%; height: 48px; cursor: pointer; display: block; }
   .top-right .device { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .job.reveal .player, .mk-bubble.flicker { animation: none; } }
+
+/* sostegno al progetto */
+.support { display: flex; justify-content: center; padding: 28px 16px 36px; }
+.support-link { color: var(--muted); text-decoration: none; font-size: 14px; padding: 8px 16px;
+  border: 1px solid var(--border); border-radius: 999px; transition: color .15s, border-color .15s; }
+.support-link:hover, .support-link:focus-visible { color: var(--banana); border-color: var(--banana); }
