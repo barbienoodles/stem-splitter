@@ -131,6 +131,11 @@ class JobManager:
             except FileNotFoundError:
                 pass
 
+    def busy(self) -> bool:
+        """True se c'è un lavoro in coda o in esecuzione."""
+        with self._jobs_lock:
+            return any(j.status in ("queued", "running") for j in self.jobs.values())
+
     def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)
 

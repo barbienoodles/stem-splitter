@@ -23,8 +23,12 @@ datas = (
     + collect_data_files("certifi")
 )
 
+# I file dei modelli Demucs sono stati salvati con numpy 1 e citano "numpy.core.multiarray":
+# con numpy 2 sono moduli di compatibilità che nessuno importa direttamente, quindi PyInstaller
+# non li includerebbe e torch.load fallirebbe ("No module named 'numpy.core.multiarray'").
 hiddenimports = (
-    collect_submodules("demucs")
+    collect_submodules("numpy.core")
+    + collect_submodules("demucs")
     + collect_submodules("uvicorn")
     + ["stem_splitter.app", "multipart", "python_multipart"]
 )

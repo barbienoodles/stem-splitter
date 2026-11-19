@@ -54,6 +54,12 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+function showClosed(idle = false) {
+  const name = state.info?.name || "Banana Split";
+  const why = idle ? "Si è chiuso da solo perché non era più in uso. " : "";
+  document.body.innerHTML = `<main class="closed"><h1>${name} è chiuso 👋</h1><p class="muted">${why}Puoi chiudere questa scheda. Per riaprirlo, avvia di nuovo l'app.</p></main>`;
+}
+
 async function init() {
   const info = await api("/api/info");
   state.info = info;
@@ -96,8 +102,16 @@ async function init() {
     $("#quit").hidden = false;
     $("#quit").onclick = async () => {
       try { await api("/api/shutdown", { method: "POST" }); } catch {}
-      document.body.innerHTML = `<main class="closed"><h1>${state.info.name || "Banana Split"} è chiuso 👋</h1><p class="muted">Puoi chiudere questa scheda. Per riaprirlo, avvia di nuovo l'app.</p></main>`;
+      showClosed();
     };
+    // l'app resta accesa solo finché questa scheda è aperta: la tiene sveglia con un ping
+    let failures = 0;
+    const ping = async () => {
+      try { await api("/api/ping", { method: "POST" }); failures = 0; }
+      catch { if (++failures >= 2) { clearInterval(timer); showClosed(true); } }
+    };
+    const timer = setInterval(ping, 20000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) ping(); });
   }
 
   // il file si può lasciare cadere ovunque nella pagina: la scimmietta si emoziona
