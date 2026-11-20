@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -75,12 +77,27 @@ def require_app_header(x_stem_splitter: str | None = Header(None)) -> None:
         raise HTTPException(403, "Richiesta non consentita")
 
 
+def _start_idle_watchdog(app, manager, on_shutdown, idle_timeout: float, every: float = 5.0) -> None:
+    def watch() -> None:
+        while True:
+            time.sleep(min(every, idle_timeout))
+            if manager.busy():
+                app.state.last_seen = time.monotonic()
+            elif time.monotonic() - app.state.last_seen > idle_timeout:
+                print("Nessuna scheda aperta: Banana Split si chiude.")
+                on_shutdown()
+                return
+
+    threading.Thread(target=watch, daemon=True, name="idle-watchdog").start()
+
+
 def create_app(
     separator: Separator | None = None,
     workdir: Path | None = None,
     on_shutdown=None,
     allowed_hosts=LOCAL_HOSTS,
     token: str | None = None,
+    idle_timeout: float | None = None,
 ) -> FastAPI:
     separator = separator or Separator()
     manager = JobManager(separator, workdir or default_workdir())
@@ -88,6 +105,11 @@ def create_app(
     app.state.manager = manager
     # chiave d'accesso per avvio (vedi auth.py); senza token l'app resta aperta, come nei test
     app.state.auth = LocalAuth(token) if token else None
+    # la pagina aperta manda un "ping" ogni 20 s: se per idle_timeout secondi non arriva nulla
+    # (scheda chiusa) e non ci sono lavori in corso, l'app si chiude da sola
+    app.state.last_seen = time.monotonic()
+    if on_shutdown is not None and idle_timeout:
+        _start_idle_watchdog(app, manager, on_shutdown, idle_timeout)
     if app.state.auth:
         app.add_middleware(AuthMiddleware, auth=app.state.auth)
     # aggiunto per ultimo = eseguito per primo: l'Host si controlla prima di tutto
@@ -104,6 +126,7 @@ def create_app(
         """Nuovo codice monouso per aprire la pagina (lo chiede un secondo avvio dell'app)."""
         if not app.state.auth:
             raise HTTPException(404, "Non disponibile")
+        app.state.last_seen = time.monotonic()  # una scheda sta per aprirsi
         return {"code": app.state.auth.new_code()}
 
     @app.get("/api/info")
@@ -132,6 +155,11 @@ def create_app(
             "input_extensions": list(INPUT_EXTENSIONS),
             "max_upload_mb": MAX_UPLOAD_MB,
         }
+
+    @app.post("/api/ping", dependencies=[Depends(require_app_header)])
+    def ping():
+        app.state.last_seen = time.monotonic()
+        return {"ok": True}
 
     @app.post("/api/shutdown", dependencies=[Depends(require_app_header)])
     def shutdown():

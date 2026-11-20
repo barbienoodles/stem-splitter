@@ -836,3 +836,53 @@ def test_unknown_upload_extensions_are_neutralised(song, tmp_path):
         job = m.submit(name, src, "vocals", "standard", "wav")
         assert job.input_path.suffix == expected, name
         m.delete(job.id)
+
+
+def test_idle_shutdown_after_last_tab_closes(tmp_path, monkeypatch):
+    """Senza ping (nessuna scheda aperta) l'app si chiude; con i ping resta accesa."""
+    import stem_splitter.server as srv
+
+    closed = []
+    monkeypatch.setattr(srv, "_start_idle_watchdog",
+                        lambda *a, **k: _orig_watchdog(*a, **{**k, "every": 0.05}))
+    app = srv.create_app(FakeSeparator("cpu"), tmp_path / "jobs", on_shutdown=lambda: closed.append(1),
+                         idle_timeout=0.6)
+    c = _local_client(app, headers={"X-Stem-Splitter": "1"})
+    for _ in range(6):  # una scheda aperta continua a mandare ping
+        assert c.post("/api/ping").status_code == 200
+        time.sleep(0.2)
+    assert not closed
+    time.sleep(1.2)  # nessun ping: si chiude
+    assert closed == [1]
+
+
+def test_idle_shutdown_waits_for_running_job(song, tmp_path, monkeypatch):
+    import stem_splitter.server as srv
+
+    closed = []
+    monkeypatch.setattr(srv, "_start_idle_watchdog",
+                        lambda *a, **k: _orig_watchdog(*a, **{**k, "every": 0.05}))
+    app = srv.create_app(SlowSeparator("cpu"), tmp_path / "jobs", on_shutdown=lambda: closed.append(1),
+                         idle_timeout=0.5)
+    c = _local_client(app, headers={"X-Stem-Splitter": "1"})
+    with open(song, "rb") as f:
+        job_id = c.post("/api/jobs", files={"file": ("a.mp3", f)}, data={"stem": "vocals"}).json()["id"]
+    time.sleep(1.5)  # il lavoro dura ~10 s: niente chiusura nel frattempo
+    assert not closed and app.state.manager.get(job_id).status in ("queued", "running")
+    c.delete(f"/api/jobs/{job_id}")
+
+
+def test_model_files_numpy_references_resolve():
+    """I .th di Demucs citano numpy.core.multiarray (numpy 1): deve risolversi anche con numpy 2."""
+    import pickle
+
+    for ref in (b"numpy.core.multiarray\nscalar", b"numpy.core.multiarray\n_reconstruct"):
+        assert callable(pickle.loads(b"c" + ref + b"\n."))
+
+
+def test_spec_bundles_numpy_core_shims():
+    spec = (Path(__file__).parents[1] / "packaging" / "stem_splitter.spec").read_text()
+    assert 'collect_submodules("numpy.core")' in spec
+
+
+from stem_splitter.server import _start_idle_watchdog as _orig_watchdog  # noqa: E402

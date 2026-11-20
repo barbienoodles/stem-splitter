@@ -3,7 +3,8 @@
 - avvia il server su una porta libera e apre il browser;
 - se l'app è già aperta, riapre solo la pagina invece di avviarne una seconda;
 - senza finestra di terminale: i messaggi vanno in ~/.banana-split/banana-split.log;
-- l'app si chiude dal pulsante "Chiudi l'app" nella pagina;
+- l'app si chiude dal pulsante "Chiudi l'app" nella pagina, oppure da sola 5 minuti dopo che
+  l'ultima scheda è stata chiusa (se non sta separando nulla);
 - `--self-test` verifica il pacchetto (PyTorch, Demucs, ffmpeg, server) senza scaricare modelli.
 """
 
@@ -25,6 +26,7 @@ from pathlib import Path
 
 APP_ID = "banana-split"
 DEFAULT_PORT = 8765
+IDLE_TIMEOUT = 300  # secondi senza schede aperte (e senza lavori) prima di chiudersi da sola
 
 
 def app_home() -> Path:
@@ -119,7 +121,7 @@ def run(port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
     write_token_file(_token_file(), token)
     server_box: dict = {}
     app = create_app(sep, on_shutdown=lambda: setattr(server_box["server"], "should_exit", True),
-                     token=token)
+                     token=token, idle_timeout=IDLE_TIMEOUT)
     server = server_box["server"] = _make_server(app, port)
     url = f"http://127.0.0.1:{port}/"
 
@@ -157,6 +159,15 @@ def self_test() -> int:
                 m = HTDemucs(["drums", "bass", "other", "vocals"], channels=8, t_layers=1, segment=4)
                 self._models[name] = BagOfModels([m]).eval()
             return self._models[name]
+
+    # i file dei modelli veri citano numpy.core.multiarray (salvati con numpy 1): deve esistere
+    # anche nel pacchetto, altrimenti torch.load fallisce solo con i modelli scaricati
+    import pickle
+
+    for ref in (b"numpy.core.multiarray\nscalar", b"numpy.core.multiarray\n_reconstruct",
+                b"numpy\ndtype"):
+        pickle.loads(b"c" + ref + b"\n.")
+    print("riferimenti numpy dei modelli: ok")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
