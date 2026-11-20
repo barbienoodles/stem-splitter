@@ -1,6 +1,7 @@
 """Test end-to-end con un HTDemucs piccolo a pesi casuali (nessun download richiesto)."""
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -886,3 +887,28 @@ def test_spec_bundles_numpy_core_shims():
 
 
 from stem_splitter.server import _start_idle_watchdog as _orig_watchdog  # noqa: E402
+
+
+def test_save_audio_streams_in_chunks_bit_exact(tmp_path):
+    """Il salvataggio a blocchi produce esattamente gli stessi campioni (anche oltre un blocco)."""
+    from stem_splitter import audio
+
+    x = (0.5 * np.random.default_rng(1).standard_normal((2, audio._CHUNK * 2 + 1234))).astype(np.float32)
+    p = audio.save_audio(x, tmp_path / "x", 44100, "wav", bit_depth="32f")
+    y = audio.load_audio(p, 44100)
+    assert y.shape == x.shape and np.array_equal(y, x)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="script shell")
+def test_save_audio_explains_silent_ffmpeg_exit(tmp_path, monkeypatch):
+    """Se ffmpeg muore senza messaggi, l'errore spiega il motivo invece di restare vuoto."""
+    from stem_splitter import audio
+
+    fake = tmp_path / "ffmpeg"
+    fake.write_text("#!/bin/sh\nkill -9 $$\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(audio, "ffmpeg_exe", lambda: str(fake))
+    with pytest.raises(RuntimeError) as e:
+        audio.save_audio(np.zeros((2, 44100 * 5), np.float32), tmp_path / "x", 44100, "wav")
+    assert "SIGKILL" in str(e.value) and "memoria" in str(e.value)
+    assert "0xC0000005" in audio._exit_reason(0xC0000005)  # su Windows il codice è senza segno

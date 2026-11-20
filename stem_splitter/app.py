@@ -180,6 +180,10 @@ def self_test() -> int:
         out = sep.separate(song, tmp / "out", fmt="flac", samplerate=96000, midside="mix")
         assert list(out) == ["vocals", "drums", "instrumental", "mix_mid", "mix_side"], list(out)
         assert load_audio(out["vocals"], sr).shape[1] > sr * 2
+        # le impostazioni predefinite dell'interfaccia (WAV 44,1 kHz 24 bit) e il 16 bit con dither
+        for bits in ("24", "16"):
+            p = save_audio(np.stack([sig, sig]), tmp / f"wav{bits}", sr, "wav", sr, bits)
+            assert load_audio(p, sr).shape[1] == sig.size, bits
         print("separazione: ok", ", ".join(out))
 
         port = _free_port(DEFAULT_PORT + 100)
