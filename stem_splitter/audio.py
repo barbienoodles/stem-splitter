@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -90,7 +92,7 @@ def load_audio(path: str | Path, samplerate: int, channels: int = 2) -> np.ndarr
         msg = proc.stderr.decode(errors="replace").strip().splitlines()
         if any("matches no streams" in m for m in msg):
             raise ValueError("Il file non contiene una traccia audio.")
-        raise ValueError(f"Impossibile leggere il file audio: {msg[-1] if msg else 'errore ffmpeg'}")
+        raise ValueError(f"Impossibile leggere il file audio: {msg[-1] if msg else _exit_reason(proc.returncode)}")
     data = np.frombuffer(proc.stdout, dtype=np.float32)
     if data.size == 0:
         raise ValueError("Il file non contiene audio.")
@@ -195,7 +197,48 @@ def save_audio(
         "-f", "f32le", "-ar", str(samplerate), "-ac", str(channels), "-i", "-",
         *resample, *dither, *_codec_args(fmt, bit_depth), str(path),
     ]
-    proc = subprocess.run(cmd, input=np.ascontiguousarray(wav.T).tobytes(), capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"Errore nel salvataggio: {proc.stderr.decode(errors='replace')}")
+    # i campioni vanno a ffmpeg a blocchi: niente copia intera del brano in memoria (con 6 stem
+    # e brani lunghi le copie complete potevano esaurire la RAM); stderr su file, non su pipe,
+    # così ffmpeg non si blocca mai mentre scriviamo
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
+                                **_NO_WINDOW)
+        try:
+            for start in range(0, wav.shape[1], _CHUNK):
+                proc.stdin.write(np.ascontiguousarray(wav[:, start:start + _CHUNK].T).tobytes())
+        except (BrokenPipeError, OSError):
+            pass  # ffmpeg si è fermato: il motivo è nel codice d'uscita e in stderr
+        finally:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+        code = proc.wait()
+        err.seek(0)
+        detail = err.read().decode(errors="replace").strip()
+    if code != 0:
+        raise RuntimeError(f"Errore nel salvataggio di {path.name}: {detail or _exit_reason(code)}")
     return path
+
+
+_CHUNK = 1 << 18  # campioni per blocco (~2 MB in stereo)
+# su Windows ffmpeg non deve aprire una finestra di console
+_NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+
+
+def _exit_reason(code: int) -> str:
+    """Spiega un'uscita di ffmpeg senza messaggio (terminato dal sistema o andato in crash)."""
+    if code < 0:
+        name = {9: "SIGKILL", 11: "SIGSEGV", 6: "SIGABRT", 15: "SIGTERM"}.get(-code, f"segnale {-code}")
+        hint = " (probabilmente memoria insufficiente)" if code == -9 else ""
+        return f"ffmpeg è stato interrotto dal sistema ({name}){hint}"
+    win = code & 0xFFFFFFFF
+    known = {0xC0000005: "crash (accesso alla memoria non valido)",
+             0xC0000017: "memoria insufficiente", 0xC000012D: "memoria insufficiente",
+             0xC0000135: "manca una libreria di sistema", 0xC0000142: "avvio non riuscito",
+             0xC0000409: "crash"}
+    if win in known:
+        return f"ffmpeg si è chiuso: {known[win]} (codice 0x{win:08X})"
+    if code > 255:
+        return f"ffmpeg si è chiuso con il codice 0x{win:08X} (forse bloccato da un antivirus?)"
+    return f"ffmpeg si è chiuso con il codice {code} senza spiegazioni"
