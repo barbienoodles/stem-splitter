@@ -76,6 +76,19 @@ Rubber Band rimane solo come **riferimento** nel test d'ascolto.
 - Approccio 1.
 - Obiettivo: qualità più alta, non la licenza in sé.
 - Tonalità e velocità "assolutamente sì", con preascolto prima di separare.
+- **Flusso**: il brano scelto **aspetta sempre "Separa"**: prima si ascolta e si regola, poi si
+  separa. Più brani trascinati insieme: stesse impostazioni, in coda.
+- **Percorso a frecce** visibile nella pagina, come un diagramma di flusso:
+
+  ```
+  ① Scegli il brano  →  ② Ascolta e regola tonalità/velocità  →  ③ Separa
+  ```
+
+  Il passo attivo è evidenziato; quelli fatti hanno la spunta. Il pulsante "Separa" è il punto
+  d'arrivo delle frecce.
+- **Test alla cieca**: ascolta l'utente (coppie A/B anonime). Se il nostro perde contro Rubber Band
+  R3, si migliora e si ripete: **niente rilascio** finché non vince o pareggia. Il test è una tappa
+  di controllo prima dell'interfaccia e degli installer.
 
 ## Proposte mie (correggibili)
 
@@ -94,10 +107,21 @@ Rubber Band rimane solo come **riferimento** nel test d'ascolto.
   `vocals (+2 st, 90%).wav`; lo ZIP e la cartella seguono lo stesso nome.
 - **CLI**: opzioni `--pitch` e `--tempo` in `banana-split split`.
 - **Interfaccia**: due cursori con valore numerico e pulsante "0 / 100%" per azzerare; un
-  mini-player (▶/❚❚, barra di avanzamento) compare quando il brano è stato scelto e prima di
-  "Separa". Oggi il caricamento avvia subito la separazione: con il preascolto il flusso diventa
-  *scegli brano → (preascolta, regola) → Separa*. Se tonalità=0 e velocità=100% il flusso
-  resta com'è oggi (avvio immediato) — **da confermare con l'utente**.
+  mini-player (▶/❚❚, barra di avanzamento) compare quando il brano è stato scelto, dentro il
+  passo ②. Schizzo:
+
+  ```
+  ① Scegli il brano ✓  ──→  ② Ascolta e regola  ──→  ③ [ Separa 🍌 ]
+                            ▶ ━━━━━●━━━━ 1:12 / 3:40
+                            Tonalità  ◀─────●───▶  +2 st
+                            Velocità  ◀───●─────▶   90 %   [↺ 0 / 100%]
+                            (anteprima indicativa: il risultato è elaborato stem per stem)
+  ```
+- **Audio del preascolto** (mia scelta): nuova API sullo stesso server locale autenticato. Il brano
+  si carica **una sola volta**: il server lo decodifica con ffmpeg (tutti i formati accettati) e
+  fornisce al browser una versione per l'ascolto; "Separa" riusa lo stesso caricamento.
+- **Browser vecchi** (mia scelta): dove manca AudioWorklet (Safari 13 su macOS 10.13) il preascolto
+  usa un ripiego (ScriptProcessorNode) con lo stesso WASM; deve funzionare anche lì.
 
 ## Lasciato al builder
 
