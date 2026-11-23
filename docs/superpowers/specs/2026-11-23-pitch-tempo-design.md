@@ -121,7 +121,8 @@ Rubber Band rimane solo come **riferimento** nel test d'ascolto.
   si carica **una sola volta**: il server lo decodifica con ffmpeg (tutti i formati accettati) e
   fornisce al browser una versione per l'ascolto; "Separa" riusa lo stesso caricamento.
 - **Browser vecchi** (mia scelta): dove manca AudioWorklet (Safari 13 su macOS 10.13) il preascolto
-  usa un ripiego (ScriptProcessorNode) con lo stesso WASM; deve funzionare anche lì.
+  usa un ripiego: il server rende tratti da 20 s con il motore nativo e il browser li riproduce in
+  coda; deve funzionare anche lì.
 
 ## Lasciato al builder
 
